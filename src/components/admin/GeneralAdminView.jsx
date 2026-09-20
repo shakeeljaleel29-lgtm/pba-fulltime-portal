@@ -424,6 +424,17 @@ export const GeneralAdminView = ({ isMobile }) => {
   const handleOpenEditBatchModal = (b) => {
     setEditingBatchId(b.id);
     setBatchWizardStep(1);
+    const existingSubjs = b.batchSubjects || b.subjects || [];
+    const formattedSubjs = existingSubjs.map((s) => ({
+      subjectId: s.subjectId || s.id,
+      subjectName: s.subjectName || s.name || "",
+      subjectCode: s.subjectCode || s.code || "",
+      mainLecturerId: s.mainLecturerId || s.lecturerId || "",
+      lecturerId: s.lecturerId || s.mainLecturerId || "",
+      assistantId: s.assistantId || "",
+      defaultRecurrence: s.defaultRecurrence || s.recurrence || "weekly",
+      recurrence: s.recurrence || s.defaultRecurrence || "weekly"
+    }));
     setBatchForm({
       name: b.name || "",
       code: b.code || "",
@@ -434,7 +445,8 @@ export const GeneralAdminView = ({ isMobile }) => {
       capacity: b.capacity || 40,
       color: b.color || "#2B6CB0",
       isActive: b.isActive !== false,
-      batchSubjects: b.batchSubjects || [],
+      batchSubjects: formattedSubjs,
+      subjects: formattedSubjs,
       noClashRules: b.noClashRules || []
     });
     setShowBatchModal(true);
@@ -443,12 +455,32 @@ export const GeneralAdminView = ({ isMobile }) => {
   const handleSaveBatch = () => {
     if (!batchForm.name.trim()) return;
 
+    const assignedSubjects = (batchForm.batchSubjects || []).map((bs) => {
+      const subObj = (subjects || []).find((s) => s.id === bs.subjectId);
+      return {
+        subjectId: bs.subjectId,
+        subjectName: bs.subjectName || subObj?.name || bs.subjectId,
+        subjectCode: bs.subjectCode || subObj?.code || "SUB",
+        lecturerId: bs.mainLecturerId || bs.lecturerId || "",
+        mainLecturerId: bs.mainLecturerId || bs.lecturerId || "",
+        assistantId: bs.assistantId || "",
+        recurrence: bs.defaultRecurrence || bs.recurrence || "weekly",
+        defaultRecurrence: bs.defaultRecurrence || bs.recurrence || "weekly"
+      };
+    });
+
+    const updatedBatchForm = {
+      ...batchForm,
+      subjects: assignedSubjects,
+      batchSubjects: assignedSubjects
+    };
+
     let updated;
     if (editingBatchId) {
-      updated = batches.map((b) => (b.id === editingBatchId ? { ...b, ...batchForm } : b));
+      updated = batches.map((b) => (b.id === editingBatchId ? { ...b, ...updatedBatchForm } : b));
     } else {
       const newBatch = {
-        ...batchForm,
+        ...updatedBatchForm,
         id: "batch-" + Date.now(),
         createdAt: new Date().toISOString()
       };
@@ -468,21 +500,34 @@ export const GeneralAdminView = ({ isMobile }) => {
     }
   };
 
-  const toggleBatchSubject = (subjId) => {
+  const toggleBatchSubject = (subjectOrId) => {
+    const subjId = typeof subjectOrId === "object" ? subjectOrId.id : subjectOrId;
+    const subObj = (subjects || []).find((s) => s.id === subjId);
     const cur = batchForm.batchSubjects || [];
     const exists = cur.some((s) => s.subjectId === subjId);
+    let updatedBS;
+
     if (exists) {
-      setBatchForm({ ...batchForm, batchSubjects: cur.filter((s) => s.subjectId !== subjId) });
+      updatedBS = cur.filter((s) => s.subjectId !== subjId);
     } else {
-      setBatchForm({
-        ...batchForm,
-        batchSubjects: [
-          ...cur,
-          { subjectId: subjId, streamOverride: null, mainLecturerId: null, assistantId: null, defaultRecurrence: "weekly", notes: "" }
-        ]
-      });
+      updatedBS = [
+        ...cur,
+        {
+          subjectId: subjId,
+          subjectName: subObj?.name || "",
+          subjectCode: subObj?.code || "",
+          mainLecturerId: "",
+          lecturerId: "",
+          assistantId: "",
+          defaultRecurrence: "weekly",
+          recurrence: "weekly"
+        }
+      ];
     }
+    setBatchForm((prev) => ({ ...prev, batchSubjects: updatedBS, subjects: updatedBS }));
   };
+
+  const toggleSubject = toggleBatchSubject;
 
   const handleAddCustomRule = () => {
     if (!newRuleForm.subjectAId || !newRuleForm.subjectBId) return;
@@ -1185,16 +1230,30 @@ export const GeneralAdminView = ({ isMobile }) => {
                           style={{ width: "100%", padding: "6px 8px", border: "1px solid #E3E6EA", borderRadius: "6px", fontSize: "12px", marginBottom: "8px" }}
                         />
                         <div style={{ maxHeight: "260px", overflowY: "auto" }}>
-                          {subjects
-                            .filter((s) => (s.name || "").toLowerCase().includes(subjSearch.toLowerCase()))
+                          {(subjects || [])
+                            .filter((s) => (s.name || "").toLowerCase().includes(subjSearch.toLowerCase()) || (s.code || "").toLowerCase().includes(subjSearch.toLowerCase()))
                             .map((s) => {
                               const isChecked = (batchForm.batchSubjects || []).some((bs) => bs.subjectId === s.id);
                               return (
-                                <label key={s.id} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "4px 0", cursor: "pointer", fontSize: "12px" }}>
-                                  <input type="checkbox" checked={isChecked} onChange={() => toggleSubject(s.id)} />
-                                  <span style={{ fontSize: "10px", fontWeight: 700, color: "#718096" }}>{s.code || "SUB"}</span>
-                                  {s.name}
-                                </label>
+                                <div
+                                  key={s.id}
+                                  onClick={() => toggleBatchSubject(s.id)}
+                                  style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 0", cursor: "pointer" }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      toggleBatchSubject(s.id);
+                                    }}
+                                    style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                                  />
+                                  <span style={{ fontSize: "12px", fontWeight: 700, color: s.color || "#4F46E5", background: s.color ? s.color + "20" : "#EEF2FF", padding: "2px 6px", borderRadius: "4px" }}>
+                                    {s.code || "SUB"}
+                                  </span>
+                                  <span style={{ fontSize: "13px", color: "#1A202C" }}>{s.name}</span>
+                                </div>
                               );
                             })}
                         </div>
@@ -1215,27 +1274,35 @@ export const GeneralAdminView = ({ isMobile }) => {
                             </thead>
                             <tbody>
                               {(batchForm.batchSubjects || []).map((bs) => {
-                                const subObj = subjects.find((s) => s.id === bs.subjectId);
+                                const subObj = (subjects || []).find((s) => s.id === bs.subjectId);
+                                const subName = bs.subjectName || subObj?.name || bs.subjectId;
+                                const subCode = bs.subjectCode || subObj?.code || "SUB";
+
+                                const qualifiedLecturers = (allLecturers || []).filter(l =>
+                                  !l.subjects || l.subjects.length === 0 || l.subjects.includes(bs.subjectId) || l.subjects.includes(subName)
+                                );
+                                const lecturerList = qualifiedLecturers.length > 0 ? qualifiedLecturers : (allLecturers || []);
+
                                 return (
                                   <tr key={bs.subjectId} style={{ borderBottom: "1px solid #F0F2F5" }}>
                                     <td style={{ padding: "6px" }}>
-                                      <strong style={{ display: "block" }}>{subObj?.name || bs.subjectId}</strong>
-                                      <span style={{ fontSize: "9px", color: "#718096" }}>{subObj?.stream || "elective"}</span>
+                                      <span style={{ fontSize: "10px", fontWeight: 700, color: subObj?.color || "#4F46E5", background: subObj?.color ? subObj.color + "20" : "#EEF2FF", padding: "2px 6px", borderRadius: "4px", marginRight: "6px" }}>{subCode}</span>
+                                      <strong style={{ fontSize: "12px" }}>{subName}</strong>
                                     </td>
                                     <td style={{ padding: "6px" }}>
                                       <select
-                                        value={bs.mainLecturerId || ""}
+                                        value={bs.mainLecturerId || bs.lecturerId || ""}
                                         onChange={(e) => {
                                           const val = e.target.value;
-                                          const updatedBS = batchForm.batchSubjects.map((s) =>
-                                            s.subjectId === bs.subjectId ? { ...s, mainLecturerId: val } : s
+                                          const updatedBS = (batchForm.batchSubjects || []).map((s) =>
+                                            s.subjectId === bs.subjectId ? { ...s, mainLecturerId: val, lecturerId: val } : s
                                           );
-                                          setBatchForm({ ...batchForm, batchSubjects: updatedBS });
+                                          setBatchForm({ ...batchForm, batchSubjects: updatedBS, subjects: updatedBS });
                                         }}
-                                        style={{ width: "100%", fontSize: "11px", padding: "2px 4px" }}
+                                        style={{ width: "100%", fontSize: "11px", padding: "4px 8px", borderRadius: "6px", border: "1px solid #E3E6EA" }}
                                       >
-                                        <option value="">— Unassigned —</option>
-                                        {allLecturers.map((l) => (
+                                        <option value="">— Select Lecturer —</option>
+                                        {lecturerList.map((l) => (
                                           <option key={l.id} value={l.id}>{l.name}</option>
                                         ))}
                                       </select>
@@ -1245,38 +1312,43 @@ export const GeneralAdminView = ({ isMobile }) => {
                                         value={bs.assistantId || ""}
                                         onChange={(e) => {
                                           const val = e.target.value;
-                                          const updatedBS = batchForm.batchSubjects.map((s) =>
+                                          const updatedBS = (batchForm.batchSubjects || []).map((s) =>
                                             s.subjectId === bs.subjectId ? { ...s, assistantId: val } : s
                                           );
-                                          setBatchForm({ ...batchForm, batchSubjects: updatedBS });
+                                          setBatchForm({ ...batchForm, batchSubjects: updatedBS, subjects: updatedBS });
                                         }}
-                                        style={{ width: "100%", fontSize: "11px", padding: "2px 4px" }}
+                                        style={{ width: "100%", fontSize: "11px", padding: "4px 8px", borderRadius: "6px", border: "1px solid #E3E6EA" }}
                                       >
                                         <option value="">— None —</option>
-                                        {allLecturers.map((l) => (
+                                        {(allLecturers || []).map((l) => (
                                           <option key={l.id} value={l.id}>{l.name}</option>
                                         ))}
                                       </select>
                                     </td>
                                     <td style={{ padding: "6px" }}>
                                       <select
-                                        value={bs.defaultRecurrence || "weekly"}
+                                        value={bs.defaultRecurrence || bs.recurrence || "weekly"}
                                         onChange={(e) => {
                                           const val = e.target.value;
-                                          const updatedBS = batchForm.batchSubjects.map((s) =>
-                                            s.subjectId === bs.subjectId ? { ...s, defaultRecurrence: val } : s
+                                          const updatedBS = (batchForm.batchSubjects || []).map((s) =>
+                                            s.subjectId === bs.subjectId ? { ...s, defaultRecurrence: val, recurrence: val } : s
                                           );
-                                          setBatchForm({ ...batchForm, batchSubjects: updatedBS });
+                                          setBatchForm({ ...batchForm, batchSubjects: updatedBS, subjects: updatedBS });
                                         }}
-                                        style={{ width: "100%", fontSize: "11px", padding: "2px 4px", borderRadius: "6px", border: "1px solid #E3E6EA" }}
+                                        style={{ width: "100%", fontSize: "11px", padding: "4px 8px", borderRadius: "6px", border: "1px solid #E3E6EA" }}
                                       >
-                                        <option value="weekly">↻ Weekly</option>
-                                        <option value="biweekly">↻ Bi-weekly</option>
-                                        <option value="once">⊙ One-time</option>
+                                        <option value="weekly">Weekly</option>
+                                        <option value="fortnightly">Fortnightly</option>
+                                        <option value="custom">Custom</option>
                                       </select>
                                     </td>
                                     <td style={{ padding: "6px", textAlign: "center" }}>
-                                      <button onClick={() => toggleBatchSubject(bs.subjectId)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C53030" }}>✕</button>
+                                      <button
+                                        onClick={() => toggleBatchSubject(bs.subjectId)}
+                                        style={{ background: "none", border: "none", color: "#E53E3E", cursor: "pointer", fontSize: "16px" }}
+                                      >
+                                        ✕
+                                      </button>
                                     </td>
                                   </tr>
                                 );

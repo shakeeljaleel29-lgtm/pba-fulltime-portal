@@ -169,6 +169,29 @@ const LecturerManagementViewInner = ({ isMobile }) => {
     return `Avail: ${shortDays} · ${firstTime}`;
   };
 
+  const getLecturerSubjects = (lec) => {
+    if (!lec) return ["Unassigned"];
+    const batches = safeLS('pba_batches', []);
+    const allSubjs = safeLS('pba_subjects', data?.subjects || []);
+    const assignedFromBatches = [];
+
+    (batches || []).forEach((b) => {
+      const bSubjs = b.subjects || b.batchSubjects || [];
+      (bSubjs || []).forEach((s) => {
+        if (s.lecturerId === lec.id || s.mainLecturerId === lec.id || s.assistantId === lec.id) {
+          const subName = s.subjectName || (allSubjs || []).find((sub) => sub.id === s.subjectId)?.name || s.subjectId;
+          if (subName && !assignedFromBatches.includes(subName)) {
+            assignedFromBatches.push(subName);
+          }
+        }
+      });
+    });
+
+    const profileSubjs = Array.isArray(lec.subjects) ? lec.subjects : [];
+    const combined = Array.from(new Set([...profileSubjs, ...assignedFromBatches]));
+    return combined.length > 0 ? combined : ["Unassigned"];
+  };
+
   const allUsersFromLS = safeLS('pba_users', []);
   const allLecsFromData = Array.isArray(data?.lecturers) ? data.lecturers : [];
   const combinedUsers = [...allUsersFromLS, ...allLecsFromData];
@@ -712,7 +735,7 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                       {lec.name}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.accent, fontWeight: 500, borderBottom: '1px solid #F4F5F7' }}>
-                      <div>{lec.subjects.join(", ")}</div>
+                      <div>{getLecturerSubjects(lec).join(", ")}</div>
                       {Array.isArray(lec.assistantIds) && lec.assistantIds.length > 0 && (
                         <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                           <span style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
@@ -1081,102 +1104,87 @@ const LecturerManagementViewInner = ({ isMobile }) => {
 
       {/* TAB 3: WEEKLY AVAILABILITY GRID */}
       {activeTab === "availability" && (() => {
-        // Build raw grid rows for all lecturers
-        const gridRows = (data.lecturers || []).map((lec) => {
-          const allSlots = [];
-          const slotsByDay = {};
+        const timetable = safeLS('pba_timetable', safeLS('pba_scheduled_classes', []));
 
-          ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].forEach((day) => {
-            const daySlots = [];
+        const getLecturerCellInfo = (lecturer, day) => {
+          let avail = [];
+          if (Array.isArray(lecturer.availability)) {
+            avail = lecturer.availability.filter(a => a && (a.day === day || a.dayOfWeek === day) && a.isAvailable !== false);
+          } else if (lecturer.availability && typeof lecturer.availability === 'object') {
+            const raw = lecturer.availability[day];
+            if (Array.isArray(raw)) avail = raw;
+          }
 
-            (data.batchSubjects || []).forEach((bs) => {
-              (bs.subjectAssignments || []).forEach((sa) => {
-                const isMain = sa.mainLecturerId === lec.id || sa.mainLecturerName === lec.name;
-                const isAsst = sa.assistantLecturerId === lec.id || sa.assistantLecturerName === lec.name;
+          const sessionsFromTT = (timetable || []).filter(
+            s => (s.lecturerId === lecturer.id || s.mainLecturerId === lecturer.id || s.assistantId === lecturer.id || s.lecturerName === lecturer.name) &&
+                 (s.day === day || s.dayOfWeek === day)
+          );
 
-                if (isMain || isAsst) {
-                  const matchingSchedule = (sa.classSchedule || []).filter(
-                    (cs) => cs.dayOfWeek === day && (isMain ? (cs.taughtBy === "main" || cs.classNumber === 1) : (cs.taughtBy === "assistant" || cs.classNumber === 2))
-                  );
-
-                  if (matchingSchedule.length > 0) {
-                    matchingSchedule.forEach((cs) => {
-                      daySlots.push({
-                        role: isMain ? "main" : "assistant",
-                        subjectCode: sa.subjectCode || sa.subjectName,
-                        subjectName: sa.subjectName || sa.subjectCode,
-                        batchName: bs.batchName || bs.batch,
-                        classNumber: cs.classNumber,
-                        startTime: cs.startTime,
-                        endTime: cs.endTime,
-                        time: (cs.startTime && cs.endTime) ? `${cs.startTime} – ${cs.endTime}` : cs.time
-                      });
-                    });
-                  }
-                }
-              });
-            });
-
-            if (daySlots.length === 0 && lec.availability && lec.availability[day]) {
-              const rawSlots = lec.availability[day];
-              rawSlots.forEach((s) => {
-                const isAssistantAnywhere = (data.batchSubjects || []).some((bs) =>
-                  (bs.subjectAssignments || []).some((sa) => sa.assistantLecturerId === lec.id || sa.assistantLecturerName === lec.name)
+          const sessionsFromBS = [];
+          (data.batchSubjects || []).forEach((bs) => {
+            (bs.subjectAssignments || []).forEach((sa) => {
+              const isMain = sa.mainLecturerId === lecturer.id || sa.mainLecturerName === lecturer.name;
+              const isAsst = sa.assistantLecturerId === lecturer.id || sa.assistantLecturerName === lecturer.name;
+              if (isMain || isAsst) {
+                const matchingSchedule = (sa.classSchedule || []).filter(
+                  (cs) => cs.dayOfWeek === day
                 );
-                daySlots.push({
-                  role: isAssistantAnywhere ? "assistant" : "main",
-                  subjectCode: lec.subjects?.[0] || "SUBJ",
-                  subjectName: lec.subjects?.[0] || "SUBJ",
-                  batchName: "Batch 2024-A",
-                  classNumber: isAssistantAnywhere ? 2 : 1,
-                  time: s
+                matchingSchedule.forEach((cs) => {
+                  sessionsFromBS.push({
+                    subjectName: sa.subjectName || sa.subjectCode || "Subject",
+                    subjectCode: sa.subjectCode || sa.subjectName || "SUB",
+                    batchName: bs.batchName || bs.batch || "Batch",
+                    startTime: cs.startTime || "",
+                    endTime: cs.endTime || "",
+                    time: (cs.startTime && cs.endTime) ? `${cs.startTime}–${cs.endTime}` : (cs.time || "")
+                  });
                 });
-              });
-            }
-
-            slotsByDay[day] = daySlots;
-            allSlots.push(...daySlots);
+              }
+            });
           });
 
-          return {
-            lecturerId: lec.id,
-            lecturerName: lec.name,
-            subjects: lec.subjects || [],
-            slotsByDay,
-            allSlots
-          };
+          const allSessions = [...sessionsFromTT, ...sessionsFromBS];
+          return { avail, sessions: allSessions };
+        };
+
+        const hasSaturday = (data.lecturers || []).some((l) => {
+          const { avail, sessions } = getLecturerCellInfo(l, "Saturday");
+          return avail.length > 0 || sessions.length > 0;
         });
 
-        // Unique filter options
+        const gridDays = hasSaturday
+          ? ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+          : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
         const uniqueLecturers = (data.lecturers || []).map((l) => ({ id: l.id, name: l.name }));
         const uniqueSubjects = Array.from(
           new Set([
-            ...gridRows.flatMap((r) => r.allSlots.map((s) => s.subjectName)),
-            ...(data.subjects || []).map((s) => s.name)
+            ...(data.subjects || []).map((s) => s.name),
+            ...(data.lecturers || []).flatMap((l) => getLecturerSubjects(l))
           ])
         ).filter(Boolean);
         const uniqueBatches = Array.from(
           new Set([
-            ...gridRows.flatMap((r) => r.allSlots.map((s) => s.batchName)),
+            ...(safeLS('pba_batches', [])).map((b) => b.name),
             ...(data.batchSubjects || []).map((b) => b.batchName || b.batch)
           ])
         ).filter(Boolean);
 
-        // Filter grid rows
-        const filteredGridRows = gridRows.filter((row) => {
-          if (filterLecturer && row.lecturerId !== filterLecturer && row.lecturerName !== filterLecturer) {
+        const filteredGridRows = (data.lecturers || []).filter((row) => {
+          if (filterLecturer && row.id !== filterLecturer && row.name !== filterLecturer) {
             return false;
           }
-
           if (filterSubject || filterBatch) {
-            const hasMatchingSlot = row.allSlots.some((slot) => {
-              const subjectMatch = !filterSubject || slot.subjectName === filterSubject || slot.subjectCode === filterSubject;
-              const batchMatch = !filterBatch || slot.batchName === filterBatch;
-              return subjectMatch && batchMatch;
+            const hasMatch = gridDays.some((day) => {
+              const { sessions } = getLecturerCellInfo(row, day);
+              return sessions.some((s) => {
+                const subjectMatch = !filterSubject || s.subjectName === filterSubject || s.subjectCode === filterSubject;
+                const batchMatch = !filterBatch || s.batchName === filterBatch;
+                return subjectMatch && batchMatch;
+              });
             });
-            if (!hasMatchingSlot) return false;
+            if (!hasMatch) return false;
           }
-
           return true;
         });
 
@@ -1205,9 +1213,9 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                 <Grid size={18} style={{ color: theme.accent }} /> Weekly Lecturer Availability Grid
               </span>
               <div style={{ display: "flex", gap: "12px", alignItems: "center", fontSize: "12px", color: theme.textSecondary }}>
-                <span style={{ display: "inline-block", width: "12px", height: "12px", backgroundColor: theme.accent, borderRadius: "3px" }} />
+                <span style={{ display: "inline-block", width: "12px", height: "12px", backgroundColor: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: "3px" }} />
                 <span>Scheduled</span>
-                <span style={{ display: "inline-block", width: "12px", height: "12px", backgroundColor: "#E3E6EA", borderRadius: "3px" }} />
+                <span style={{ display: "inline-block", width: "12px", height: "12px", backgroundColor: "#F7FAFC", border: "1px dashed #CBD5E0", borderRadius: "3px" }} />
                 <span>Free Slot</span>
               </div>
             </div>
@@ -1239,16 +1247,8 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                     color: '#1A202C',
                     outline: 'none',
                     fontFamily: "'Inter', 'Segoe UI', sans-serif",
-                    appearance: 'none',
-                    WebkitAppearance: 'none',
-                    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")",
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 10px center',
-                    cursor: 'pointer',
                     minWidth: '160px'
                   }}
-                  onFocus={(e) => { e.target.style.borderColor = '#2B6CB0'; e.target.style.boxShadow = '0 0 0 3px rgba(43,108,176,0.12)'; }}
-                  onBlur={(e) => { e.target.style.borderColor = '#E3E6EA'; e.target.style.boxShadow = 'none'; }}
                 >
                   <option value="">All Lecturers</option>
                   {uniqueLecturers.map((l) => (
@@ -1272,16 +1272,8 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                     color: '#1A202C',
                     outline: 'none',
                     fontFamily: "'Inter', 'Segoe UI', sans-serif",
-                    appearance: 'none',
-                    WebkitAppearance: 'none',
-                    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")",
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 10px center',
-                    cursor: 'pointer',
                     minWidth: '160px'
                   }}
-                  onFocus={(e) => { e.target.style.borderColor = '#2B6CB0'; e.target.style.boxShadow = '0 0 0 3px rgba(43,108,176,0.12)'; }}
-                  onBlur={(e) => { e.target.style.borderColor = '#E3E6EA'; e.target.style.boxShadow = 'none'; }}
                 >
                   <option value="">All Subjects</option>
                   {uniqueSubjects.map((s) => (
@@ -1305,16 +1297,8 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                     color: '#1A202C',
                     outline: 'none',
                     fontFamily: "'Inter', 'Segoe UI', sans-serif",
-                    appearance: 'none',
-                    WebkitAppearance: 'none',
-                    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")",
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 10px center',
-                    cursor: 'pointer',
                     minWidth: '160px'
                   }}
-                  onFocus={(e) => { e.target.style.borderColor = '#2B6CB0'; e.target.style.boxShadow = '0 0 0 3px rgba(43,108,176,0.12)'; }}
-                  onBlur={(e) => { e.target.style.borderColor = '#E3E6EA'; e.target.style.boxShadow = 'none'; }}
                 >
                   <option value="">All Batches</option>
                   {uniqueBatches.map((b) => (
@@ -1344,9 +1328,6 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                       fontFamily: "'Inter', sans-serif"
                     }}
                   >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#718096" strokeWidth="2">
-                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
                     Clear
                   </button>
                 </div>
@@ -1360,123 +1341,69 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                   <thead>
                     <tr style={{ background: "#F8F9FA" }}>
                       <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Lecturer Name</th>
-                      <th>Monday</th>
-                      <th>Tuesday</th>
-                      <th>Wednesday</th>
-                      <th>Thursday</th>
-                      <th>Friday</th>
+                      {gridDays.map((d) => (
+                        <th key={d} style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder }}>{d}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredGridRows.map((row) => (
+                    {filteredGridRows.map((lec) => (
                       <tr
-                        key={row.lecturerId}
+                        key={lec.id}
                         style={{ transition: "background 0.15s" }}
                         onMouseEnter={(e) => (e.currentTarget.style.background = "#F8FAFE")}
                         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                       >
                         <td style={{ padding: '13px 16px', textAlign: 'left', borderBottom: '1px solid #F4F5F7' }}>
-                          <strong style={{ fontSize: "13px", color: theme.textPrimary }}>{row.lecturerName}</strong>
-                          <div style={{ fontSize: "11px", color: theme.accent, fontWeight: 500 }}>{row.subjects?.[0]}</div>
+                          <strong style={{ fontSize: "13px", color: theme.textPrimary }}>{lec.name}</strong>
+                          <div style={{ fontSize: "11px", color: theme.accent, fontWeight: 500 }}>{getLecturerSubjects(lec).join(", ")}</div>
                         </td>
-                        {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((day) => {
-                          const rawDaySlots = row.slotsByDay[day] || [];
-                          const daySlots = rawDaySlots.filter((slot) => {
-                            const subjectMatch = !filterSubject || slot.subjectName === filterSubject || slot.subjectCode === filterSubject;
-                            const batchMatch = !filterBatch || slot.batchName === filterBatch;
+                        {gridDays.map((day) => {
+                          const { avail, sessions } = getLecturerCellInfo(lec, day);
+                          const matchingSessions = sessions.filter((s) => {
+                            const subjectMatch = !filterSubject || s.subjectName === filterSubject || s.subjectCode === filterSubject;
+                            const batchMatch = !filterBatch || s.batchName === filterBatch;
                             return subjectMatch && batchMatch;
                           });
 
                           return (
-                            <td key={day} style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7', verticalAlign: 'top' }}>
-                              {daySlots.length > 0 ? (
-                                daySlots.map((s, idx) => {
-                                  const isMain = s.role === "main";
-                                  const displayTime = (s.startTime && s.endTime)
-                                    ? `${s.startTime} – ${s.endTime}`
-                                    : (typeof s.time === "string" && s.time.trim() ? s.time : null);
-
-                                  if (isMain) {
-                                    return (
-                                      <div
-                                        key={idx}
-                                        style={{
-                                          background: '#EBF4FF',
-                                          border: '1.5px solid #BEE3F8',
-                                          color: '#2B6CB0',
-                                          padding: '5px 8px',
-                                          borderRadius: '6px',
-                                          fontSize: '11px',
-                                          fontWeight: 600,
-                                          marginBottom: '4px',
-                                          textAlign: 'left',
-                                          whiteSpace: 'pre-line'
-                                        }}
-                                      >
-                                        <div>{s.subjectCode} — Class 1</div>
-                                        <div style={{ fontSize: '10px', opacity: 0.85 }}>{s.batchName}</div>
-                                        {displayTime && (
-                                          <div
-                                            style={{
-                                              fontSize: '10px',
-                                              color: '#2B6CB0',
-                                              opacity: 0.8,
-                                              marginTop: '2px',
-                                              fontWeight: 500
-                                            }}
-                                          >
-                                            {displayTime}
-                                          </div>
-                                        )}
+                            <td key={day} style={{ padding: '12px 14px', borderBottom: '1px solid #F4F5F7', verticalAlign: 'top', minWidth: '130px' }}>
+                              {matchingSessions.length > 0 ? (
+                                matchingSessions.map((s, idx) => (
+                                  <div
+                                    key={idx}
+                                    style={{
+                                      background: '#EEF2FF',
+                                      border: '1px solid #C7D2FE',
+                                      borderRadius: '8px',
+                                      padding: '6px 8px',
+                                      marginBottom: '4px',
+                                      fontSize: '11px',
+                                      textAlign: 'left'
+                                    }}
+                                  >
+                                    <div style={{ fontWeight: 700, color: '#4F46E5' }}>{s.subjectName || s.subjectCode}</div>
+                                    <div style={{ color: '#6B7280', fontSize: '10px' }}>{s.batchName}</div>
+                                    {(s.startTime || s.endTime || s.time) && (
+                                      <div style={{ color: '#6B7280', fontSize: '10px', marginTop: '2px' }}>
+                                        {s.startTime && s.endTime ? `${s.startTime}–${s.endTime}` : s.time}
                                       </div>
-                                    );
-                                  } else {
-                                    let mainLecturerName = s.mainLecturerName;
-                                    if (!mainLecturerName) {
-                                      const pbaUsers = safeLS('pba_users', []);
-                                      const allLecs = [...pbaUsers, ...(data.lecturers || [])];
-                                      const mainLec = allLecs.find(u => Array.isArray(u.assistantIds) && u.assistantIds.includes(row.lecturerId));
-                                      if (mainLec) {
-                                        mainLecturerName = mainLec.name;
-                                      }
-                                    }
+                                    )}
+                                  </div>
+                                ))
+                              ) : avail.length > 0 ? (
+                                <div style={{ color: '#718096', fontSize: '11px', fontStyle: 'italic', padding: '4px 0' }}>
+                                  {avail.map((a, idx) => {
+                                    const timeStr = typeof a === 'string'
+                                      ? a
+                                      : (a.startTime && a.endTime ? `${a.startTime}–${a.endTime}` : (a.from && a.to ? `${a.from}–${a.to}` : 'Available'));
                                     return (
-                                      <div
-                                        key={idx}
-                                        style={{
-                                          background: '#FEF3C7',
-                                          border: '1.5px solid #F6D860',
-                                          color: '#B7860A',
-                                          padding: '5px 8px',
-                                          borderRadius: '6px',
-                                          fontSize: '11px',
-                                          fontWeight: 600,
-                                          marginBottom: '4px',
-                                          textAlign: 'left',
-                                          whiteSpace: 'pre-line'
-                                        }}
-                                      >
-                                        <div>{s.subjectCode} — Class 2 (Asst)</div>
-                                        <div style={{ fontSize: '10px', opacity: 0.85 }}>{s.batchName}</div>
-                                        {displayTime && (
-                                          <div
-                                            style={{
-                                              fontSize: '10px',
-                                              color: '#B7860A',
-                                              opacity: 0.8,
-                                              marginTop: '2px',
-                                              fontWeight: 500
-                                            }}
-                                          >
-                                            {displayTime}
-                                          </div>
-                                        )}
-                                      </div>
+                                      <div key={idx}>Free {timeStr}</div>
                                     );
-                                  }
-                                })
+                                  })}
+                                </div>
                               ) : (
-                                <span style={{ color: theme.textMuted, fontSize: "12px" }}>Free</span>
+                                <span style={{ color: '#CBD5E0', fontSize: '11px' }}>—</span>
                               )}
                             </td>
                           );
