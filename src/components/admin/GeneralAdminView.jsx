@@ -339,6 +339,31 @@ export const GeneralAdminView = ({ isMobile }) => {
   const [enrollSubjectIds, setEnrollSubjectIds] = useState([]);
   const [enrollSearchQuery, setEnrollSearchQuery] = useState("");
 
+  // Monthly Calendar State
+  const [calendarDate, setCalendarDate] = useState(() => new Date());
+  const [calendarEvents, setCalendarEvents] = useState(() => safeLS("pba_academic_calendar", []));
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [eventForm, setEventForm] = useState({ date: "", title: "", type: "event", notes: "", color: "#6B46C1" });
+  const [editingEvent, setEditingEvent] = useState(null);
+
+  // Today's Class Changes & Timetable & Attendance State
+  const [todayDate, setTodayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [timetable, setTimetable] = useState(() => {
+    const t1 = safeLS("pba_timetable", []);
+    const t2 = safeLS("pba_timetable_sessions", []);
+    return (t1 && t1.length > 0) ? t1 : t2;
+  });
+  const [attendanceRecords, setAttendanceRecords] = useState(() => {
+    const a1 = safeLS("pba_attendance", []);
+    const a2 = safeLS("pba_session_attendance", []);
+    return (a1 && a1.length > 0) ? a1 : a2;
+  });
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [attendanceSession, setAttendanceSession] = useState(null);
+  const [students, setStudents] = useState(() => safeLS("pba_students", []));
+  const [attendanceMarks, setAttendanceMarks] = useState({});
+  const [viewAttDetailsModal, setViewAttDetailsModal] = useState({ isOpen: false, session: null, records: [] });
+
   // Session Attendance State (pba_session_attendance)
   const [sessionAttendance, setSessionAttendance] = useState(() => safeLS("pba_session_attendance", []));
   const [attModal, setAttModal] = useState({ isOpen: false, isReadOnly: false, session: null, date: "", records: {} });
@@ -358,6 +383,15 @@ export const GeneralAdminView = ({ isMobile }) => {
   const [makeUpForm, setMakeUpForm] = useState({ date: "", startTime: "08:00", endTime: "10:00", classroomId: "", notes: "" });
 
   // Sync states to LS
+  useEffect(() => {
+    saveLS("pba_academic_calendar", calendarEvents);
+  }, [calendarEvents]);
+
+  useEffect(() => {
+    saveLS("pba_attendance", attendanceRecords);
+    saveLS("pba_session_attendance", attendanceRecords);
+  }, [attendanceRecords]);
+
   useEffect(() => {
     saveLS("pba_batch_enrollments", batchEnrollments);
   }, [batchEnrollments]);
@@ -1934,7 +1968,7 @@ export const GeneralAdminView = ({ isMobile }) => {
         <VisualTimetableBuilder initialClassroomId={selectedClassroomForSchedule} onOpenBatchManager={() => setActiveTab("batches")} />
       )}
 
-      {/* TAB 4: TODAY'S CLASS CHANGES */}
+      {/* TAB 4: TODAY'S CLASS CHANGES & ATTENDANCE */}
       {activeTab === "schedule" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
           {/* SESSION LIST CARD */}
@@ -1975,10 +2009,23 @@ export const GeneralAdminView = ({ isMobile }) => {
                     const selDateObj = new Date(allocationDate + "T00:00:00");
                     const selDayName = selDateObj.toLocaleDateString("en-US", { weekday: "long" });
 
-                    const runningSessions = sessions.filter((s) => {
-                      if (s.date) return s.date === allocationDate;
-                      return s.day === selDayName;
+                    const timetableData = (() => {
+                      const t1 = safeLS("pba_timetable", []);
+                      const t2 = safeLS("pba_timetable_sessions", []);
+                      return (t1 && t1.length > 0) ? t1 : (t2 && t2.length > 0) ? t2 : sessions;
+                    })();
+
+                    const runningSessions = (timetableData || []).filter((s) => {
+                      if (s.recurrence === "weekly" || s.recurrence === "biweekly") return s.day === selDayName;
+                      if (s.recurrence === "one_time") return s.startDate === allocationDate || s.date === allocationDate;
+                      return s.day === selDayName || s.date === allocationDate;
                     });
+
+                    const allAtt = (() => {
+                      const a1 = safeLS("pba_attendance", []);
+                      const a2 = safeLS("pba_session_attendance", []);
+                      return [...(a1 || []), ...(a2 || [])];
+                    })();
 
                     if (runningSessions.length === 0) {
                       return (
@@ -1991,17 +2038,23 @@ export const GeneralAdminView = ({ isMobile }) => {
                     }
 
                     return runningSessions.map((sess) => {
-                      const changeRec = classChanges.find((c) => c.sessionId === sess.id && c.date === allocationDate);
+                      const changeRec = (classChanges || []).find((c) => c.sessionId === sess.id && c.date === allocationDate);
                       const isCancelled = changeRec?.type === "cancelled";
-                      const isChanged = changeRec?.type === "changed";
 
-                      const attRec = sessionAttendance.find((a) => a.sessionId === sess.id && a.date === allocationDate);
-                      const isAttMarked = !!attRec;
+                      const hasAttendance = (allAtt || []).some(
+                        (a) => (a.sessionId === sess.id) && a.date === allocationDate
+                      );
 
-                      const batchObj = batches.find((b) => b.id === sess.batchId);
-                      const subjObj = subjects.find((s) => s.id === sess.subjectId);
-                      const clsObj = classrooms.find((c) => c.id === sess.classroomId);
-                      const lecObj = allLecturers.find((u) => u.id === sess.lecturerId);
+                      const batchObj = (batches || []).find((b) => b.id === sess.batchId);
+                      const subjObj = (subjects || []).find((s) => s.id === sess.subjectId);
+                      const clsObj = (classrooms || []).find((c) => c.id === sess.classroomId);
+                      const lecObj = (allLecturers || []).find((u) => u.id === sess.lecturerId);
+
+                      const displaySubject = (sess.subjectName && sess.subjectName !== "(No Subject)")
+                        ? sess.subjectName
+                        : (subjObj?.name && subjObj.name !== "(No Subject)" ? subjObj.name : (sess.batchName || batchObj?.name || "No Subject"));
+
+                      const isSubjectMissing = (!sess.subjectName || sess.subjectName === "(No Subject)") && !subjObj?.name;
 
                       return (
                         <tr key={sess.id} style={{ borderBottom: "1px solid #F0F2F5", background: isCancelled ? "#FFF5F5" : "transparent" }}>
@@ -2014,7 +2067,14 @@ export const GeneralAdminView = ({ isMobile }) => {
                             )}
                           </td>
                           <td style={{ padding: "12px 14px", fontWeight: 600 }}>{sess.batchName || batchObj?.name || "Batch"}</td>
-                          <td style={{ padding: "12px 14px", fontWeight: 600, color: "#2B6CB0" }}>{sess.subjectName || subjObj?.name || "Subject"}</td>
+                          <td style={{ padding: "12px 14px", fontWeight: 600, color: "#2B6CB0" }}>
+                            <div>{displaySubject}</div>
+                            {isSubjectMissing && (
+                              <div style={{ fontSize: "10px", color: "#B7860A", marginTop: "2px" }}>
+                                ⚠ Edit to assign subject
+                              </div>
+                            )}
+                          </td>
                           <td style={{ padding: "12px 14px" }}>{sess.lecturerName || lecObj?.name || "Lecturer"}</td>
                           <td style={{ padding: "12px 14px" }}>{sess.classroomName || clsObj?.name || "Room"}</td>
                           <td style={{ padding: "12px 14px" }}>
@@ -2022,74 +2082,60 @@ export const GeneralAdminView = ({ isMobile }) => {
                               <span style={{ background: "#FFF5F5", border: "1px solid #FEB2B2", borderRadius: "12px", padding: "3px 10px", fontSize: "11px", fontWeight: 700, color: "#C53030" }}>
                                 ✕ Cancelled
                               </span>
-                            ) : isChanged ? (
-                              <span style={{ background: "#FFFBEB", border: "1px solid #F6D860", borderRadius: "12px", padding: "3px 10px", fontSize: "11px", fontWeight: 700, color: "#B7860A" }}>
-                                ⇄ Changed
+                            ) : hasAttendance ? (
+                              <span style={{ background: "#F0FFF4", border: "1px solid #9AE6B4", borderRadius: "12px", padding: "3px 10px", fontSize: "11px", fontWeight: 700, color: "#276749" }}>
+                                ✓ Attendance Taken
                               </span>
                             ) : (
-                              <span style={{ background: "#F0FFF4", border: "1px solid #9AE6B4", borderRadius: "12px", padding: "3px 10px", fontSize: "11px", fontWeight: 700, color: "#276749" }}>
-                                ✓ Normal
+                              <span style={{ background: "#FFFBEB", border: "1px solid #F6D860", borderRadius: "12px", padding: "3px 10px", fontSize: "11px", fontWeight: 700, color: "#B7860A" }}>
+                                ⏳ Pending
                               </span>
                             )}
                           </td>
                           <td style={{ padding: "12px 14px", textAlign: "right" }}>
                             <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
-                              {/* Attendance Button / Pill */}
-                              {isAttMarked ? (
-                                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                                  <span
-                                    style={{
-                                      background: "#F0FFF4",
-                                      border: "1px solid #9AE6B4",
-                                      borderRadius: "20px",
-                                      padding: "4px 12px",
-                                      fontSize: "11px",
-                                      fontWeight: 700,
-                                      color: "#276749"
-                                    }}
-                                  >
-                                    ✓ Attendance Marked
-                                  </span>
-                                  <button
-                                    onClick={() => {
-                                      const recsObj = {};
-                                      (attRec.records || []).forEach((r) => { recsObj[r.studentId] = r.status; });
-                                      setAttModal({ isOpen: true, isReadOnly: false, session: sess, date: allocationDate, records: recsObj });
-                                    }}
-                                    style={{ border: "none", background: "transparent", color: "#718096", fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}
-                                  >
-                                    Edit
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    setAttModal({ isOpen: true, isReadOnly: false, session: sess, date: allocationDate, records: {} });
-                                  }}
-                                  style={{
-                                    padding: "7px 14px",
-                                    background: "transparent",
-                                    border: "1.5px solid #68D391",
-                                    borderRadius: "7px",
-                                    fontSize: "12px",
-                                    fontWeight: 600,
-                                    color: "#276749",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "5px",
-                                    whiteSpace: "nowrap"
-                                  }}
-                                >
-                                  ✓ Mark Attendance
-                                </button>
-                              )}
+                              <button
+                                onClick={() => {
+                                  setAttendanceSession(sess);
+                                  const studentsList = safeLS("pba_students", data?.students || []);
+                                  const batchStudents = (studentsList || []).filter(
+                                    (st) => st.batchId === sess.batchId || (batchEnrollments || []).some((e) => e.batchId === sess.batchId && e.studentId === st.id && e.status === "active")
+                                  );
+                                  const effectiveStudents = batchStudents.length > 0 ? batchStudents : (studentsList || []);
 
-                              {/* Toggle Cancelled/Changed Button */}
+                                  const existingAtt = (allAtt || []).filter((a) => a.sessionId === sess.id && a.date === allocationDate);
+                                  const initialMarks = {};
+                                  effectiveStudents.forEach((st) => {
+                                    const rec = existingAtt.find((r) => r.studentId === st.id);
+                                    if (rec) {
+                                      initialMarks[st.id] = rec.status || "present";
+                                    } else {
+                                      const groupRec = existingAtt.find((r) => r.records && Array.isArray(r.records));
+                                      const stRec = groupRec?.records?.find((r) => r.studentId === st.id);
+                                      initialMarks[st.id] = stRec?.status || "present";
+                                    }
+                                  });
+                                  setAttendanceMarks(initialMarks);
+                                  setShowAttendanceModal(true);
+                                }}
+                                style={{
+                                  padding: "5px 12px",
+                                  background: hasAttendance ? "#EEF2FF" : "#4F46E5",
+                                  color: hasAttendance ? "#4F46E5" : "white",
+                                  border: hasAttendance ? "1px solid #C7D2FE" : "none",
+                                  borderRadius: "6px",
+                                  fontSize: "11px",
+                                  fontWeight: 700,
+                                  cursor: "pointer"
+                                }}
+                              >
+                                {hasAttendance ? "View Attendance" : "📋 Take Attendance"}
+                              </button>
+
                               <button
                                 onClick={() => {
                                   if (isCancelled) {
-                                    const updated = classChanges.filter((c) => !(c.sessionId === sess.id && c.date === allocationDate));
+                                    const updated = (classChanges || []).filter((c) => !(c.sessionId === sess.id && c.date === allocationDate));
                                     setClassChanges(updated);
                                   } else {
                                     const newRec = {
@@ -2099,7 +2145,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                                       type: "cancelled",
                                       markedAt: new Date().toISOString()
                                     };
-                                    setClassChanges([...classChanges, newRec]);
+                                    setClassChanges([...(classChanges || []), newRec]);
                                   }
                                 }}
                                 style={{
@@ -2115,50 +2161,6 @@ export const GeneralAdminView = ({ isMobile }) => {
                               >
                                 {isCancelled ? "Restore Class" : "Mark Cancelled"}
                               </button>
-
-                              {/* Schedule Make-up button / info pill */}
-                              {isCancelled && (
-                                changeRec?.makeupScheduled ? (
-                                  <span
-                                    style={{
-                                      background: "#EBF4FF",
-                                      border: "1px solid #BEE3F8",
-                                      borderRadius: "20px",
-                                      padding: "4px 12px",
-                                      fontSize: "11px",
-                                      fontWeight: 700,
-                                      color: "#2B6CB0"
-                                    }}
-                                  >
-                                    📅 Make-up Scheduled
-                                  </span>
-                                ) : (
-                                  <button
-                                    onClick={() => {
-                                      setMakeUpModal({ isOpen: true, session: sess, date: allocationDate, classChange: changeRec });
-                                      setMakeUpForm({
-                                        date: allocationDate,
-                                        startTime: sess.startTime || "08:00",
-                                        endTime: sess.endTime || "10:00",
-                                        classroomId: sess.classroomId || classrooms[0]?.id || "",
-                                        notes: ""
-                                      });
-                                    }}
-                                    style={{
-                                      padding: "5px 12px",
-                                      background: "transparent",
-                                      border: "1.5px solid #BEE3F8",
-                                      borderRadius: "7px",
-                                      fontSize: "11px",
-                                      fontWeight: 600,
-                                      color: "#2B6CB0",
-                                      cursor: "pointer"
-                                    }}
-                                  >
-                                    📅 Schedule Make-up
-                                  </button>
-                                )
-                              )}
                             </div>
                           </td>
                         </tr>
@@ -2170,7 +2172,7 @@ export const GeneralAdminView = ({ isMobile }) => {
             </div>
           </div>
 
-          {/* PART B — ADMIN ATTENDANCE VIEW SECTION */}
+          {/* PART B — ATTENDANCE RECORDS SECTION */}
           <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: "12px", padding: "20px" }}>
             <div
               onClick={() => setAttRecordsOpen(!attRecordsOpen)}
@@ -2204,7 +2206,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                       style={{ padding: "6px 10px", border: "1px solid #E3E6EA", borderRadius: "7px", fontSize: "12px", background: "#FFF" }}
                     >
                       <option value="All">All Batches</option>
-                      {batches.map((b) => (
+                      {(batches || []).map((b) => (
                         <option key={b.id} value={b.id}>{b.name}</option>
                       ))}
                     </select>
@@ -2218,7 +2220,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                       style={{ padding: "6px 10px", border: "1px solid #E3E6EA", borderRadius: "7px", fontSize: "12px", background: "#FFF" }}
                     >
                       <option value="All">All Subjects</option>
-                      {subjects.map((s) => (
+                      {(subjects || []).map((s) => (
                         <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
@@ -2232,7 +2234,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                       style={{ padding: "6px 10px", border: "1px solid #E3E6EA", borderRadius: "7px", fontSize: "12px", background: "#FFF" }}
                     >
                       <option value="All">All Lecturers</option>
-                      {allLecturers.map((l) => (
+                      {(allLecturers || []).map((l) => (
                         <option key={l.id} value={l.id}>{l.name}</option>
                       ))}
                     </select>
@@ -2258,7 +2260,56 @@ export const GeneralAdminView = ({ isMobile }) => {
                     </thead>
                     <tbody>
                       {(() => {
-                        const filteredAtt = sessionAttendance.filter((rec) => {
+                        const rawRecords = (() => {
+                          const pbaAtt = safeLS("pba_attendance", []);
+                          const sessAtt = safeLS("pba_session_attendance", []);
+
+                          const list = [];
+                          (pbaAtt || []).forEach((r) => {
+                            list.push({
+                              sessionId: r.sessionId,
+                              date: r.date,
+                              batchId: r.batchId,
+                              batchName: r.batchName,
+                              subjectId: r.subjectId,
+                              subjectName: r.subjectName,
+                              lecturerId: r.lecturerId,
+                              lecturerName: r.lecturerName,
+                              startTime: r.startTime,
+                              endTime: r.endTime,
+                              studentId: r.studentId,
+                              studentName: r.studentName,
+                              status: r.status
+                            });
+                          });
+
+                          (sessAtt || []).forEach((sRec) => {
+                            (sRec.records || []).forEach((r) => {
+                              const exists = list.some((x) => x.sessionId === sRec.sessionId && x.date === sRec.date && x.studentId === r.studentId);
+                              if (!exists) {
+                                const st = (data?.students || []).find((st) => st.id === r.studentId);
+                                list.push({
+                                  sessionId: sRec.sessionId,
+                                  date: sRec.date,
+                                  batchId: sRec.batchId,
+                                  batchName: (batches || []).find((b) => b.id === sRec.batchId)?.name || "Batch",
+                                  subjectId: sRec.subjectId,
+                                  subjectName: (subjects || []).find((s) => s.id === sRec.subjectId)?.name || "Subject",
+                                  lecturerId: sRec.lecturerId,
+                                  lecturerName: (allLecturers || []).find((l) => l.id === sRec.lecturerId)?.name || "Lecturer",
+                                  startTime: sRec.startTime || "08:00",
+                                  endTime: sRec.endTime || "10:00",
+                                  studentId: r.studentId,
+                                  studentName: st?.name || r.studentId,
+                                  status: r.status
+                                });
+                              }
+                            });
+                          });
+                          return list;
+                        })();
+
+                        const filteredAtt = (rawRecords || []).filter((rec) => {
                           if (attFilterDate && rec.date !== attFilterDate) return false;
                           if (attFilterBatch !== "All" && rec.batchId !== attFilterBatch) return false;
                           if (attFilterSubject !== "All" && rec.subjectId !== attFilterSubject) return false;
@@ -2266,7 +2317,31 @@ export const GeneralAdminView = ({ isMobile }) => {
                           return true;
                         });
 
-                        if (filteredAtt.length === 0) {
+                        const grouped = {};
+                        (filteredAtt || []).forEach((record) => {
+                          const key = `${record.sessionId}_${record.date}`;
+                          if (!grouped[key]) {
+                            const sessObj = (sessions || []).find((s) => s.id === record.sessionId);
+                            grouped[key] = {
+                              sessionId: record.sessionId,
+                              date: record.date,
+                              batchId: record.batchId,
+                              batchName: record.batchName || (batches || []).find((b) => b.id === record.batchId)?.name || "Batch",
+                              subjectId: record.subjectId,
+                              subjectName: record.subjectName || (subjects || []).find((s) => s.id === record.subjectId)?.name || "Subject",
+                              lecturerId: record.lecturerId,
+                              lecturerName: record.lecturerName || (allLecturers || []).find((l) => l.id === record.lecturerId)?.name || "Lecturer",
+                              startTime: record.startTime || sessObj?.startTime || "08:00",
+                              endTime: record.endTime || sessObj?.endTime || "10:00",
+                              records: []
+                            };
+                          }
+                          grouped[key].records.push(record);
+                        });
+
+                        const groupedList = Object.values(grouped);
+
+                        if (groupedList.length === 0) {
                           return (
                             <tr>
                               <td colSpan="10" style={{ padding: "20px", textAlign: "center", color: "#A0AEC0" }}>
@@ -2276,51 +2351,45 @@ export const GeneralAdminView = ({ isMobile }) => {
                           );
                         }
 
-                        return filteredAtt.map((rec) => {
-                          const sessObj = sessions.find((s) => s.id === rec.sessionId);
-                          const batchObj = batches.find((b) => b.id === rec.batchId);
-                          const subjObj = subjects.find((s) => s.id === rec.subjectId);
-                          const lecObj = allLecturers.find((u) => u.id === rec.lecturerId);
+                        return groupedList.map((group) => {
+                          const presentCount = group.records.filter((r) => r.status === "present").length;
+                          const absentCount = group.records.filter((r) => r.status === "absent").length;
+                          const lateCount = group.records.filter((r) => r.status === "late").length;
+                          const total = group.records.length;
 
-                          const recsList = rec.records || [];
-                          const presentCount = recsList.filter((r) => r.status === "present").length;
-                          const absentCount = recsList.filter((r) => r.status === "absent").length;
-                          const lateCount = recsList.filter((r) => r.status === "late").length;
-                          const totalEnrolled = recsList.length || 1;
-
-                          const ratePct = Math.round(((presentCount + lateCount) / totalEnrolled) * 100);
-                          const rateColor = ratePct >= 80 ? "#276749" : ratePct >= 60 ? "#B7860A" : "#C53030";
+                          const ratePct = total > 0 ? Math.round(((presentCount + lateCount) / total) * 100) : 0;
+                          const rateColor = ratePct >= 80 ? "#276749" : ratePct >= 60 ? "#B7860A" : "#E53E3E";
 
                           return (
-                            <tr key={rec.id} style={{ borderBottom: "1px solid #F0F2F5" }}>
-                              <td style={{ padding: "10px", fontWeight: 600 }}>{rec.date}</td>
-                              <td style={{ padding: "10px" }}>{batchObj?.name || "Batch"}</td>
-                              <td style={{ padding: "10px", fontWeight: 600, color: "#2B6CB0" }}>{subjObj?.name || "Subject"}</td>
-                              <td style={{ padding: "10px" }}>{lecObj?.name || "Lecturer"}</td>
-                              <td style={{ padding: "10px" }}>{sessObj ? `${sessObj.startTime}–${sessObj.endTime}` : "—"}</td>
+                            <tr key={`${group.sessionId}_${group.date}`} style={{ borderBottom: "1px solid #F0F2F5" }}>
+                              <td style={{ padding: "10px", fontWeight: 600 }}>{group.date}</td>
+                              <td style={{ padding: "10px" }}>{group.batchName}</td>
+                              <td style={{ padding: "10px", fontWeight: 600, color: "#2B6CB0" }}>{group.subjectName}</td>
+                              <td style={{ padding: "10px" }}>{group.lecturerName}</td>
+                              <td style={{ padding: "10px" }}>{group.startTime}–{group.endTime}</td>
                               <td style={{ padding: "10px", textAlign: "center", color: "#276749", fontWeight: 700 }}>{presentCount}</td>
-                              <td style={{ padding: "10px", textAlign: "center", color: "#C53030", fontWeight: 700 }}>{absentCount}</td>
+                              <td style={{ padding: "10px", textAlign: "center", color: "#E53E3E", fontWeight: 700 }}>{absentCount}</td>
                               <td style={{ padding: "10px", textAlign: "center", color: "#B7860A", fontWeight: 700 }}>{lateCount}</td>
-                              <td style={{ padding: "10px", textAlign: "center", fontWeight: 800, color: rateColor }}>{ratePct}%</td>
+                              <td style={{ padding: "10px", textAlign: "center" }}>
+                                <span style={{ background: rateColor + "18", color: rateColor, padding: "3px 10px", borderRadius: "12px", fontWeight: 800, fontSize: "11px" }}>
+                                  {ratePct}%
+                                </span>
+                              </td>
                               <td style={{ padding: "10px", textAlign: "right" }}>
                                 <button
-                                  onClick={() => {
-                                    const recsObj = {};
-                                    recsList.forEach((r) => { recsObj[r.studentId] = r.status; });
-                                    setAttModal({ isOpen: true, isReadOnly: true, session: sessObj || { batchId: rec.batchId, subjectId: rec.subjectId, lecturerId: rec.lecturerId }, date: rec.date, records: recsObj });
-                                  }}
+                                  onClick={() => setViewAttDetailsModal({ isOpen: true, session: group, records: group.records })}
                                   style={{
-                                    padding: "4px 10px",
-                                    background: "#EBF4FF",
-                                    color: "#2B6CB0",
-                                    border: "1px solid #BEE3F8",
+                                    padding: "4px 12px",
+                                    background: "#EEF2FF",
+                                    color: "#4F46E5",
+                                    border: "1px solid #C7D2FE",
                                     borderRadius: "6px",
                                     fontSize: "11px",
-                                    fontWeight: 600,
+                                    fontWeight: 700,
                                     cursor: "pointer"
                                   }}
                                 >
-                                  View
+                                  View Details
                                 </button>
                               </td>
                             </tr>
@@ -3064,8 +3133,145 @@ export const GeneralAdminView = ({ isMobile }) => {
       {/* TAB 5: MONTHLY CALENDAR */}
       {activeTab === "calendar" && (
         <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: "12px", padding: "20px" }}>
-          <h3 style={{ margin: "0 0 10px", fontFamily: t.fontHeading, fontSize: "18px", fontWeight: 700 }}>Monthly Academic Calendar</h3>
-          <p style={{ fontSize: "12px", color: "#718096" }}>Track term dates, holidays, examination weeks, and major institute events.</p>
+          {/* Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
+            <div>
+              <h3 style={{ margin: 0, fontFamily: t.fontHeading, fontSize: "18px", fontWeight: 700, color: "#1A202C" }}>Monthly Academic Calendar</h3>
+              <p style={{ fontSize: "12px", color: "#718096", margin: "2px 0 0" }}>Track term dates, holidays, examination weeks, and major institute events.</p>
+            </div>
+
+            <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1))}
+                  style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid #E3E6EA", background: "white", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}
+                >
+                  ← Prev
+                </button>
+                <span style={{ fontWeight: 700, fontSize: "15px", color: "#1A202C", minWidth: "140px", textAlign: "center" }}>
+                  {calendarDate.toLocaleString("default", { month: "long", year: "numeric" })}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 1))}
+                  style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid #E3E6EA", background: "white", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}
+                >
+                  Next →
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEventForm({ date: new Date().toISOString().slice(0, 10), title: "", type: "event", notes: "", color: "#6B46C1" });
+                  setEditingEvent(null);
+                  setShowEventModal(true);
+                }}
+                style={{ padding: "8px 18px", background: "#4F46E5", color: "white", border: "none", borderRadius: "8px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}
+              >
+                + Add Event
+              </button>
+            </div>
+          </div>
+
+          {/* Legend Row */}
+          <div style={{ display: "flex", gap: "14px", marginBottom: "16px", flexWrap: "wrap", padding: "10px 14px", background: "#F8FAFC", borderRadius: "8px", border: "1px solid #EDF2F7" }}>
+            {[
+              { type: "term_start", label: "Term Start", color: "#276749" },
+              { type: "term_end", label: "Term End", color: "#2B6CB0" },
+              { type: "holiday", label: "Holiday", color: "#E53E3E" },
+              { type: "exam_week", label: "Exam Week", color: "#B7860A" },
+              { type: "event", label: "Event", color: "#6B46C1" }
+            ].map(t => (
+              <div key={t.type} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#4A5568" }}>
+                <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: t.color, display: "inline-block" }} />
+                <span style={{ fontWeight: 600 }}>{t.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Calendar Grid */}
+          {(() => {
+            const year = calendarDate.getFullYear();
+            const month = calendarDate.getMonth();
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+            const cells = [];
+            for (let i = 0; i < firstDay; i++) cells.push(null);
+            for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+            return (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "4px" }}>
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => (
+                  <div key={day} style={{ textAlign: "center", padding: "8px", fontSize: "11px", fontWeight: 700, color: "#718096", background: "#F7F8FC", borderRadius: "4px" }}>
+                    {day}
+                  </div>
+                ))}
+                {cells.map((day, idx) => {
+                  if (!day) return <div key={idx} style={{ minHeight: "85px", background: "#FAFAFA", borderRadius: "6px", border: "1px solid #F0F0F0" }} />;
+                  const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                  const dayEvents = (calendarEvents || []).filter(e => e.date === dateStr);
+                  const isToday = dateStr === new Date().toISOString().slice(0, 10);
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => {
+                        setEventForm({ date: dateStr, title: "", type: "event", notes: "", color: "#6B46C1" });
+                        setEditingEvent(null);
+                        setShowEventModal(true);
+                      }}
+                      style={{
+                        minHeight: "85px",
+                        padding: "6px",
+                        background: isToday ? "#EEF2FF" : "white",
+                        border: isToday ? "2px solid #4F46E5" : "1px solid #E3E6EA",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                        transition: "background 0.15s",
+                        display: "flex",
+                        flexDirection: "column"
+                      }}
+                    >
+                      <div style={{ fontSize: "13px", fontWeight: isToday ? 700 : 500, color: isToday ? "#4F46E5" : "#1A202C", marginBottom: "4px" }}>
+                        {day}
+                      </div>
+                      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "2px" }}>
+                        {dayEvents.map(ev => (
+                          <div
+                            key={ev.id}
+                            onClick={e => {
+                              e.stopPropagation();
+                              setEventForm(ev);
+                              setEditingEvent(ev);
+                              setShowEventModal(true);
+                            }}
+                            style={{
+                              fontSize: "10px",
+                              fontWeight: 600,
+                              padding: "2px 5px",
+                              background: (ev.color || "#6B46C1") + "22",
+                              color: ev.color || "#6B46C1",
+                              borderLeft: `3px solid ${ev.color || "#6B46C1"}`,
+                              borderRadius: "3px",
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis"
+                            }}
+                            title={`${ev.title}${ev.notes ? " - " + ev.notes : ""}`}
+                          >
+                            {ev.title}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -3471,6 +3677,336 @@ export const GeneralAdminView = ({ isMobile }) => {
               <Check size={16} /> {toastMessage}
             </div>
           )}
+        </div>
+      )}
+
+      {/* MODAL 1: ADD / EDIT ACADEMIC EVENT MODAL */}
+      {showEventModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "480px", maxWidth: "95vw", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #E3E6EA", paddingBottom: "12px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>
+                {editingEvent ? "Edit Academic Event" : "Add Academic Event"}
+              </h3>
+              <button onClick={() => setShowEventModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A0AEC0" }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                if (!eventForm.title.trim()) return;
+                if (editingEvent) {
+                  const updated = (calendarEvents || []).map(ev => ev.id === editingEvent.id ? { ...eventForm, id: editingEvent.id } : ev);
+                  saveLS("pba_academic_calendar", updated);
+                  setCalendarEvents(updated);
+                } else {
+                  const newEv = { ...eventForm, id: Date.now().toString() };
+                  const updated = [...(calendarEvents || []), newEv];
+                  saveLS("pba_academic_calendar", updated);
+                  setCalendarEvents(updated);
+                }
+                setShowEventModal(false);
+                triggerToast("✓ Academic event saved");
+              }}
+            >
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", marginBottom: "4px" }}>DATE *</label>
+                <input
+                  type="date"
+                  required
+                  value={eventForm.date}
+                  onChange={e => setEventForm({ ...eventForm, date: e.target.value })}
+                  style={{ width: "100%", padding: "8px 12px", border: "1px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", marginBottom: "4px" }}>TITLE *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Mid-Term Examinations Start"
+                  value={eventForm.title}
+                  onChange={e => setEventForm({ ...eventForm, title: e.target.value })}
+                  style={{ width: "100%", padding: "8px 12px", border: "1px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", marginBottom: "4px" }}>EVENT TYPE *</label>
+                <select
+                  value={eventForm.type}
+                  onChange={e => {
+                    const val = e.target.value;
+                    const colorMap = {
+                      term_start: "#276749",
+                      term_end: "#2B6CB0",
+                      holiday: "#E53E3E",
+                      exam_week: "#B7860A",
+                      event: "#6B46C1"
+                    };
+                    setEventForm({ ...eventForm, type: val, color: colorMap[val] || "#6B46C1" });
+                  }}
+                  style={{ width: "100%", padding: "8px 12px", border: "1px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", background: "#FFF", boxSizing: "border-box" }}
+                >
+                  <option value="term_start">Term Start (#276749 Green)</option>
+                  <option value="term_end">Term End (#2B6CB0 Blue)</option>
+                  <option value="holiday">Holiday (#E53E3E Red)</option>
+                  <option value="exam_week">Exam Week (#B7860A Amber)</option>
+                  <option value="event">Event (#6B46C1 Purple)</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: "18px" }}>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", marginBottom: "4px" }}>NOTES (OPTIONAL)</label>
+                <textarea
+                  rows="3"
+                  placeholder="Additional details..."
+                  value={eventForm.notes || ""}
+                  onChange={e => setEventForm({ ...eventForm, notes: e.target.value })}
+                  style={{ width: "100%", padding: "8px 12px", border: "1px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: editingEvent ? "space-between" : "flex-end", alignItems: "center", borderTop: "1px solid #E3E6EA", paddingTop: "14px" }}>
+                {editingEvent && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = (calendarEvents || []).filter(ev => ev.id !== editingEvent.id);
+                      saveLS("pba_academic_calendar", updated);
+                      setCalendarEvents(updated);
+                      setShowEventModal(false);
+                      triggerToast("✓ Academic event deleted");
+                    }}
+                    style={{ background: "none", border: "none", color: "#E53E3E", fontSize: "13px", fontWeight: 600, cursor: "pointer", padding: 0 }}
+                  >
+                    Delete Event
+                  </button>
+                )}
+
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowEventModal(false)}
+                    style={{ padding: "8px 16px", background: "white", border: "1px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "#4A5568", cursor: "pointer" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    style={{ padding: "8px 20px", background: "#4F46E5", color: "white", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}
+                  >
+                    Save Event
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: TAKE ATTENDANCE MODAL */}
+      {showAttendanceModal && attendanceSession && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "600px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px", borderBottom: "1px solid #E3E6EA", paddingBottom: "12px" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>
+                  Attendance — {attendanceSession.subjectName || subjects.find(s=>s.id===attendanceSession.subjectId)?.name || 'Subject'} | {attendanceSession.batchName || batches.find(b=>b.id===attendanceSession.batchId)?.name || 'Batch'} | {allocationDate}
+                </h3>
+                <div style={{ fontSize: "12px", color: "#718096", marginTop: "4px" }}>
+                  {attendanceSession.startTime}–{attendanceSession.endTime} · Lecturer: {attendanceSession.lecturerName || allLecturers.find(l=>l.id===attendanceSession.lecturerId)?.name || 'Lecturer'}
+                </div>
+              </div>
+              <button onClick={() => setShowAttendanceModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A0AEC0" }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {(() => {
+              const studentsList = safeLS("pba_students", data?.students || []);
+              const batchStudents = (studentsList || []).filter(
+                s => s.batchId === attendanceSession.batchId || (batchEnrollments || []).some(e => e.batchId === attendanceSession.batchId && e.studentId === s.id && e.status === "active")
+              );
+              const effectiveStudents = batchStudents.length > 0 ? batchStudents : (studentsList || []);
+
+              const presentCount = effectiveStudents.filter(s => (attendanceMarks[s.id] || "present") === "present").length;
+              const lateCount = effectiveStudents.filter(s => attendanceMarks[s.id] === "late").length;
+              const absentCount = effectiveStudents.filter(s => attendanceMarks[s.id] === "absent").length;
+              const total = effectiveStudents.length;
+              const ratePct = total > 0 ? Math.round(((presentCount + lateCount) / total) * 100) : 0;
+
+              return (
+                <div>
+                  {/* Quick action buttons */}
+                  <div style={{ display: "flex", gap: "10px", marginBottom: "14px" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = {};
+                        effectiveStudents.forEach(s => { updated[s.id] = "present"; });
+                        setAttendanceMarks(updated);
+                      }}
+                      style={{ padding: "6px 14px", background: "#276749", color: "white", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Mark All Present
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = {};
+                        effectiveStudents.forEach(s => { updated[s.id] = "absent"; });
+                        setAttendanceMarks(updated);
+                      }}
+                      style={{ padding: "6px 14px", background: "#E53E3E", color: "white", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Mark All Absent
+                    </button>
+                  </div>
+
+                  {/* Live summary bar */}
+                  <div style={{ background: "#F7F8FC", padding: "10px 14px", borderRadius: "8px", marginBottom: "16px", display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 600 }}>
+                    <span style={{ color: "#276749" }}>Present: {presentCount}</span>
+                    <span style={{ color: "#B7860A" }}>Late: {lateCount}</span>
+                    <span style={{ color: "#E53E3E" }}>Absent: {absentCount}</span>
+                    <span style={{ color: "#4F46E5" }}>Attendance Rate: {ratePct}%</span>
+                  </div>
+
+                  {/* Student Rows */}
+                  <div style={{ maxHeight: "350px", overflowY: "auto", display: "flex", flexDirection: "column" }}>
+                    {effectiveStudents.map(student => {
+                      const status = attendanceMarks[student.id] || "present";
+                      return (
+                        <div key={student.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #F0F4FF" }}>
+                          <span style={{ fontWeight: 500, fontSize: "13px", color: "#1A202C" }}>{student.name}</span>
+                          <div style={{ display: "flex", gap: "6px" }}>
+                            {["present", "late", "absent"].map(st => (
+                              <button
+                                key={st}
+                                type="button"
+                                onClick={() => setAttendanceMarks(prev => ({ ...prev, [student.id]: st }))}
+                                style={{
+                                  padding: "5px 12px",
+                                  borderRadius: "6px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                  border: "none",
+                                  background: status === st
+                                    ? st === "present" ? "#276749" : st === "late" ? "#B7860A" : "#E53E3E"
+                                    : "#F0F4FF",
+                                  color: status === st ? "white" : "#718096"
+                                }}
+                              >
+                                {st === "present" ? "✓ Present" : st === "late" ? "⏰ Late" : "✗ Absent"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Footer Buttons */}
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px", paddingTop: "14px", borderTop: "1px solid #E3E6EA" }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowAttendanceModal(false)}
+                      style={{ padding: "8px 16px", background: "white", border: "1px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "#4A5568", cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const selDateObj = new Date(allocationDate + "T00:00:00");
+                        const selDayName = selDateObj.toLocaleDateString("en-US", { weekday: "long" });
+
+                        const newRecords = effectiveStudents.map(s => ({
+                          id: Date.now().toString() + "_" + s.id,
+                          sessionId: attendanceSession.id,
+                          batchId: attendanceSession.batchId,
+                          batchName: attendanceSession.batchName || batches.find(b=>b.id===attendanceSession.batchId)?.name || "",
+                          subjectId: attendanceSession.subjectId,
+                          subjectName: attendanceSession.subjectName || subjects.find(sub=>sub.id===attendanceSession.subjectId)?.name || "",
+                          lecturerId: attendanceSession.lecturerId,
+                          lecturerName: attendanceSession.lecturerName || allLecturers.find(l=>l.id===attendanceSession.lecturerId)?.name || "",
+                          studentId: s.id,
+                          studentName: s.name,
+                          date: allocationDate,
+                          day: selDayName,
+                          startTime: attendanceSession.startTime,
+                          endTime: attendanceSession.endTime,
+                          status: attendanceMarks[s.id] || "present",
+                          takenBy: safeLS("pba_logged_in_user", {})?.name || "Admin"
+                        }));
+
+                        const allAtt = safeLS("pba_attendance", []);
+                        const filteredAtt = (allAtt || []).filter(a => !(a.sessionId === attendanceSession.id && a.date === allocationDate));
+                        const updatedAtt = [...filteredAtt, ...newRecords];
+
+                        saveLS("pba_attendance", updatedAtt);
+                        saveLS("pba_session_attendance", updatedAtt);
+                        setAttendanceRecords(updatedAtt);
+                        setSessionAttendance(updatedAtt);
+                        setShowAttendanceModal(false);
+                        triggerToast("✓ Attendance saved successfully");
+                      }}
+                      style={{ padding: "8px 20px", background: "#4F46E5", color: "white", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Save Attendance
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: VIEW ATTENDANCE DETAILS MODAL */}
+      {viewAttDetailsModal.isOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "550px", maxWidth: "95vw", maxHeight: "85vh", overflowY: "auto", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #E3E6EA", paddingBottom: "12px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>
+                Attendance Details — {viewAttDetailsModal.session?.subjectName} ({viewAttDetailsModal.session?.batchName})
+              </h3>
+              <button onClick={() => setViewAttDetailsModal({ isOpen: false, session: null, records: [] })} style={{ background: "none", border: "none", cursor: "pointer", color: "#A0AEC0" }}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ fontSize: "12px", color: "#718096", marginBottom: "14px" }}>
+              Date: {viewAttDetailsModal.session?.date} | Time: {viewAttDetailsModal.session?.startTime}–{viewAttDetailsModal.session?.endTime} | Lecturer: {viewAttDetailsModal.session?.lecturerName}
+            </div>
+            <table style={{ width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#F8FAFC", borderBottom: "2px solid #E3E6EA" }}>
+                  <th style={{ padding: "8px 12px", textAlign: "left" }}>STUDENT NAME</th>
+                  <th style={{ padding: "8px 12px", textAlign: "center" }}>STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {viewAttDetailsModal.records.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid #F0F2F5" }}>
+                    <td style={{ padding: "8px 12px", fontWeight: 500 }}>{r.studentName}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "center" }}>
+                      <span style={{
+                        padding: "3px 10px", borderRadius: "12px", fontSize: "11px", fontWeight: 700,
+                        background: r.status === "present" ? "#F0FFF4" : r.status === "late" ? "#FFFBEB" : "#FFF5F5",
+                        color: r.status === "present" ? "#276749" : r.status === "late" ? "#B7860A" : "#C53030"
+                      }}>
+                        {r.status === "present" ? "✓ Present" : r.status === "late" ? "⏰ Late" : "✗ Absent"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
