@@ -41,6 +41,12 @@ export const ExamManagementView = ({ isMobile }) => {
   const [filterType, setFilterType] = useState("All");
   const [filterStatus, setFilterStatus] = useState("All");
 
+  // Filters for Results & Rankings Tab
+  const [filterBatchId, setFilterBatchId] = useState("");
+  const [filterExamName, setFilterExamName] = useState("");
+  const [rankViewMode, setRankViewMode] = useState("marksheet");
+  const [rankSubjectId, setRankSubjectId] = useState("");
+
   // Modals
   const [showAddExamModal, setShowAddExamModal] = useState(false);
   const [editingExam, setEditingExam] = useState(null);
@@ -1206,252 +1212,497 @@ export const ExamManagementView = ({ isMobile }) => {
       )}
 
       {/* SECTION 4 — RESULTS & RANKINGS TAB */}
-      {activeTab === "results" && (
-        <div>
-          {/* TOP EXAM SELECTOR */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '6px' }}>
-              Select Examination Session to View Results & Rankings
-            </label>
-            <select
-              value={selectedExamId}
-              onChange={(e) => setSelectedExamId(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 36px 10px 13px',
-                background: '#FFFFFF',
-                border: '1.5px solid #E3E6EA',
-                borderRadius: '8px',
-                fontSize: '13px',
-                fontWeight: 600,
-                color: '#1A202C',
-                outline: 'none',
-                fontFamily: "'Inter', sans-serif",
-                appearance: 'none',
-                WebkitAppearance: 'none',
-                backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")",
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 12px center',
-                cursor: 'pointer'
-              }}
-            >
-              {(data.exams || []).map((ex) => {
-                const subjCode = ex.subjectCode || ex.subject?.substring(0, 3).toUpperCase() || "GEN";
-                return (
-                  <option key={ex.id} value={ex.id}>
-                    {subjCode} — {ex.name} ({ex.batch}) — {ex.date}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
+      {activeTab === "results" && (() => {
+        const examScheduleData = safeLS('pba_exam_schedule', data.exams || []);
+        const examResultsData = safeLS('pba_exam_results', allMarks || []);
 
-          {currentSelectedExam && (
-            <>
-              {/* TOP ACTION BUTTONS */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginBottom: '16px' }}>
-                <button
-                  onClick={() => printExamResultsPDF(currentSelectedExam)}
-                  style={{
-                    padding: '8px 16px',
-                    background: 'linear-gradient(135deg, #D4A017, #B7860A)',
-                    color: '#FFFFFF',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    boxShadow: '0 2px 8px rgba(212,160,23,0.30)'
-                  }}
+        const displayScoreHelper = (r) => {
+          if (!r) return '—';
+          if (r.absent || r.isAbsent) return 'ABS';
+          const val = r.score !== undefined ? r.score : (r.marksObtained !== undefined ? r.marksObtained : r.marks);
+          if (val === null || val === undefined || val === '') return '—';
+          return val;
+        };
+
+        const displayGradeHelper = (r) => {
+          if (!r) return '—';
+          if (r.absent || r.isAbsent) return 'ABS';
+          if (r.grade) return r.grade;
+          return '—';
+        };
+
+        const gradeColorHelper = (g) => {
+          if (!g || g === '—') return { bg: '#F1F5F9', border: '#CBD5E1', color: '#64748B' };
+          if (g === 'ABS')     return { bg: '#F3F4F6', border: '#D1D5DB', color: '#6B7280' };
+          if (g === 'A')       return { bg: '#D1FAE5', border: '#A7F3D0', color: '#059669' };
+          if (g === 'B')       return { bg: '#DBEAFE', border: '#BFDBFE', color: '#1D4ED8' };
+          if (g === 'C')       return { bg: '#FEF3C7', border: '#FDE68A', color: '#D97706' };
+          if (g === 'D')       return { bg: '#FFEDD5', border: '#FED7AA', color: '#EA580C' };
+          return { bg: '#FEE2E2', border: '#FCA5A5', color: '#DC2626' }; // F
+        };
+
+        // Available Exam Names for selected batch
+        const examNamesForBatch = filterBatchId
+          ? [...new Set(
+              (examScheduleData || [])
+                .filter(e => e.batchId === filterBatchId || e.batch === filterBatchId || e.batchId === (batches.find(b => b.id === filterBatchId)?.name))
+                .map(e => e.examName || e.name)
+            )].filter(Boolean).sort()
+          : [...new Set((examScheduleData || []).map(e => e.examName || e.name))].filter(Boolean).sort();
+
+        // Filtered exam sessions
+        const filteredSessions = (examScheduleData || []).filter(e => {
+          if (filterBatchId) {
+            const batchObj = batches.find(b => b.id === filterBatchId);
+            const matchesBatch = e.batchId === filterBatchId || e.batch === filterBatchId || (batchObj && e.batch === batchObj.name);
+            if (!matchesBatch) return false;
+          }
+          if (filterExamName && (e.examName || e.name) !== filterExamName) return false;
+          return true;
+        });
+
+        // Derive subject columns
+        const subjectColumns = [];
+        const seenSubjects = new Set();
+        (filteredSessions || []).forEach(sess => {
+          const sId = sess.subjectId || sess.subject;
+          if (sId && !seenSubjects.has(sId)) {
+            seenSubjects.add(sId);
+            const subObj = (subjects || []).find(s => s.id === sId || s.name === sId || s.code === sId);
+            subjectColumns.push({
+              subjectId: sId,
+              subjectName: subObj?.name || sess.subjectName || sess.subject || sId,
+              subjectCode: subObj?.code || sess.subjectCode || (subObj?.name || sess.subjectName || String(sId)).substring(0, 4).toUpperCase(),
+              maxScore: Number(sess.maxScore || sess.totalMarks || 100)
+            });
+          }
+        });
+
+        // Fallback subject columns if none derived from sessions
+        if (subjectColumns.length === 0 && (subjects || []).length > 0) {
+          subjects.slice(0, 5).forEach(subObj => {
+            subjectColumns.push({
+              subjectId: subObj.id,
+              subjectName: subObj.name,
+              subjectCode: subObj.code || subObj.name.substring(0, 4).toUpperCase(),
+              maxScore: 100
+            });
+          });
+        }
+
+        // Filtered Students
+        const selectedBatchObj = (batches || []).find(b => b.id === filterBatchId);
+        const filteredStudents = (students || []).filter(s => {
+          if (!filterBatchId) return true;
+          return s.batchId === filterBatchId || s.batch === filterBatchId || (selectedBatchObj && s.batch === selectedBatchObj.name);
+        }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+        // Results lookup: lookup[studentId][subjectId]
+        const resultsLookup = {};
+        (examResultsData || []).forEach(r => {
+          if (filterBatchId) {
+            const matchesBatch = r.batchId === filterBatchId || r.batch === filterBatchId || (selectedBatchObj && r.batch === selectedBatchObj.name);
+            if (!matchesBatch) return;
+          }
+          if (filterExamName && (r.examName || r.name) !== filterExamName) return;
+
+          const stId = r.studentId;
+          const sbId = r.subjectId || r.subjectName || r.subject;
+          if (!stId) return;
+          if (!resultsLookup[stId]) resultsLookup[stId] = {};
+          resultsLookup[stId][sbId] = r;
+        });
+
+        // Compute Student Totals
+        const studentTotals = filteredStudents.map(student => {
+          let totalScore = 0;
+          let totalMax = 0;
+          subjectColumns.forEach(col => {
+            const r = (resultsLookup[student.id] || {})[col.subjectId] || (resultsLookup[student.id] || {})[col.subjectName];
+            const isAbs = r?.absent || r?.isAbsent;
+            const scoreVal = r?.score !== undefined ? r.score : (r?.marksObtained !== undefined ? r.marksObtained : r?.marks);
+            if (r && !isAbs && scoreVal !== null && scoreVal !== undefined && scoreVal !== '') {
+              totalScore += Number(scoreVal);
+            }
+            totalMax += Number(col.maxScore);
+          });
+          const pct = totalMax > 0 ? Math.round((totalScore / totalMax) * 100) : 0;
+          return { student, totalScore, totalMax, pct };
+        });
+
+        const rankedTotals = [...studentTotals].sort((a, b) => b.totalScore - a.totalScore);
+        const rankMap = {};
+        rankedTotals.forEach((item, i) => {
+          rankMap[item.student.id] = i + 1;
+        });
+
+        return (
+          <div>
+            {/* STEP 1 — TOP FILTER BAR */}
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', gap: '12px',
+              alignItems: 'center', padding: '16px',
+              background: '#F8FAFC', borderRadius: '12px',
+              border: '1px solid #E2E8F0', marginBottom: '16px'
+            }}>
+              {/* BATCH FILTER */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#64748B' }}>Batch:</span>
+                <select
+                  value={filterBatchId}
+                  onChange={e => { setFilterBatchId(e.target.value); setFilterExamName(''); setRankSubjectId(''); }}
+                  style={{ fontSize: '13px', padding: '7px 12px', borderRadius: '8px', border: '1px solid #E2E8F0', color: '#1A202C', background: 'white', cursor: 'pointer' }}
                 >
-                  <Printer size={16} /> Print Results (PDF)
-                </button>
-                <button
-                  onClick={() => {
-                    const headers = ["Rank", "Registration No", "Student Name", "Marks Obtained", "Total Marks", "Grade", "Status"];
-                    const rows = rankedResults.map((r) => [
-                      r.rank,
-                      r.regNo,
-                      r.name,
-                      r.isAbsent ? "ABS" : r.marks,
-                      totalMaxMarks,
-                      r.grade,
-                      r.isPassed ? "Pass" : r.isAbsent ? "Absent" : "Fail"
-                    ]);
-                    exportToCSV(`${currentSelectedExam.name}_Rankings`, headers, rows);
-                  }}
-                  style={{
-                    padding: '8px 16px',
-                    background: '#FFFFFF',
-                    color: '#4A5568',
-                    border: '1.5px solid #E3E6EA',
-                    borderRadius: '8px',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  <Download size={16} /> Export CSV
-                </button>
+                  <option value="">All Batches</option>
+                  {(batches || []).map(b => (
+                    <option key={b.id} value={b.id}>{b.name} ({b.shortCode || b.code || 'BATCH'})</option>
+                  ))}
+                </select>
               </div>
 
-              {/* STATS TILES ROW */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-                {/* Tile 1 */}
-                <div style={{ background: '#EBF4FF', borderRadius: '10px', padding: '14px 18px', border: '1px solid #BEE3F8' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#2B6CB0', fontFamily: "'Sora',sans-serif" }}>{classAvg}</div>
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Class Average</div>
-                  <div style={{ fontSize: '11px', color: '#718096', marginTop: '2px' }}>out of {totalMaxMarks}</div>
-                </div>
-
-                {/* Tile 2 */}
-                <div style={{ background: '#F0FFF4', borderRadius: '10px', padding: '14px 18px', border: '1px solid #9AE6B4' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#2F855A', fontFamily: "'Sora',sans-serif" }}>
-                    {highestMarkObj ? `${highestMarkObj.marks} / ${totalMaxMarks}` : "-"}
-                  </div>
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Highest Mark</div>
-                  <div style={{ fontSize: '11px', color: '#718096', marginTop: '2px' }}>
-                    {highestMarkObj ? highestMarkObj.name : "N/A"}
-                  </div>
-                </div>
-
-                {/* Tile 3 */}
-                <div style={{ background: '#EBF4FF', borderRadius: '10px', padding: '14px 18px', border: '1px solid #BEE3F8' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#2B6CB0', fontFamily: "'Sora',sans-serif" }}>{passCount}/{currentBatchStudents.length}</div>
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pass Rate</div>
-                  <div style={{ fontSize: '11px', color: '#718096', marginTop: '2px' }}>{passPct}% passed</div>
-                </div>
-
-                {/* Tile 4 */}
-                <div style={{ background: '#F7FAFC', borderRadius: '10px', padding: '14px 18px', border: '1px solid #E2E8F0' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#718096', fontFamily: "'Sora',sans-serif" }}>{absentCount}</div>
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Absent</div>
-                  <div style={{ fontSize: '11px', color: '#718096', marginTop: '2px' }}>students</div>
-                </div>
+              {/* EXAM NAME FILTER */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#64748B' }}>Exam:</span>
+                <select
+                  value={filterExamName}
+                  onChange={e => { setFilterExamName(e.target.value); setRankSubjectId(''); }}
+                  style={{ fontSize: '13px', padding: '7px 12px', borderRadius: '8px', border: '1px solid #E2E8F0', color: '#1A202C', background: 'white', cursor: 'pointer' }}
+                >
+                  <option value="">All Exams</option>
+                  {examNamesForBatch.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
               </div>
 
-              {/* RESULTS TABLE */}
-              <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', overflow: 'hidden', marginBottom: '24px' }}>
-                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                  <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: '#F8F9FA' }}>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left', width: '90px' }}>Rank</th>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left' }}>Student Name</th>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left' }}>Marks / Total</th>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'center' }}>Grade</th>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'center' }}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rankedResults.map((r) => {
-                        const gStyle = gradeColor(r.grade);
+              {/* VIEW MODE TOGGLE */}
+              <div style={{
+                display: 'flex', gap: '4px', marginLeft: 'auto',
+                background: '#EEF2FF', borderRadius: '10px', padding: '4px'
+              }}>
+                {[
+                  { key: 'marksheet', label: '📋 Mark Sheet' },
+                  { key: 'overall',   label: '🏆 Overall Ranking' },
+                  { key: 'subject',   label: '📚 By Subject' }
+                ].map(mode => (
+                  <button
+                    key={mode.key}
+                    onClick={() => { setRankViewMode(mode.key); setRankSubjectId(''); }}
+                    style={{
+                      padding: '6px 14px', borderRadius: '7px',
+                      fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                      border: 'none',
+                      background: rankViewMode === mode.key ? '#4F46E5' : 'transparent',
+                      color: rankViewMode === mode.key ? 'white' : '#4F46E5',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-                        return (
-                          <tr key={r.studentId} style={{ borderBottom: '1px solid #F4F5F7', background: r.rank === 1 ? '#FEF3C720' : 'transparent' }}>
-                            <td style={{ padding: '12px 16px' }}>
-                              {r.rank === 1 ? (
-                                <span style={{ background: '#FEF3C7', color: '#D4A017', border: '1px solid #F6D860', fontSize: '11px', fontWeight: 800, padding: '3px 8px', borderRadius: '20px' }}>
-                                  🏆 #1
-                                </span>
-                              ) : r.rank === 2 ? (
-                                <span style={{ background: '#EDF2F7', color: '#4A5568', border: '1px solid #CBD5E0', fontSize: '11px', fontWeight: 800, padding: '3px 8px', borderRadius: '20px' }}>
-                                  🥈 #2
-                                </span>
-                              ) : r.rank === 3 ? (
-                                <span style={{ background: '#FFEDD5', color: '#C05621', border: '1px solid #FBD38D', fontSize: '11px', fontWeight: 800, padding: '3px 8px', borderRadius: '20px' }}>
-                                  🥉 #3
-                                </span>
-                              ) : (
-                                <strong style={{ color: '#4A5568', fontSize: '12px' }}>{r.rank !== "-" ? `#${r.rank}` : "-"}</strong>
-                              )}
-                            </td>
-                            <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 700, color: '#1A202C' }}>
-                              {r.name} <small style={{ color: '#2B6CB0', fontFamily: 'monospace' }}>({r.regNo})</small>
-                            </td>
-                            <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: '#1A202C' }}>
-                              {r.isAbsent ? "ABS" : `${r.marks} / ${totalMaxMarks}`}
-                            </td>
-                            <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                              <span style={{
-                                background: gStyle.bg,
-                                color: gStyle.color,
-                                border: `1px solid ${gStyle.border}`,
-                                padding: '3px 10px',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                fontWeight: 700
-                              }}>
-                                {r.grade}
-                              </span>
-                            </td>
-                            <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                              {r.isAbsent ? (
-                                <span style={{ background: '#F7FAFC', color: '#718096', border: '1px solid #E2E8F0', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
-                                  ABSENT
-                                </span>
-                              ) : r.isPassed ? (
-                                <span style={{ background: '#F0FFF4', color: '#2F855A', border: '1px solid #9AE6B4', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
-                                  PASS
-                                </span>
-                              ) : (
-                                <span style={{ background: '#FFF5F5', color: '#C53030', border: '1px solid #FEB2B2', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
-                                  FAIL
-                                </span>
-                              )}
-                            </td>
+            {/* VIEW A — BATCH MARK SHEET */}
+            {rankViewMode === 'marksheet' && (
+              <div>
+                {filteredStudents.length > 0 && subjectColumns.length > 0 ? (
+                  <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+                    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                        <thead>
+                          <tr style={{ background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)' }}>
+                            <th style={{ padding: '10px 12px', color: 'white', textAlign: 'left', fontWeight: 700, width: '45px' }}>#</th>
+                            <th style={{ padding: '10px 12px', color: 'white', textAlign: 'left', fontWeight: 700, minWidth: '160px' }}>STUDENT</th>
+                            {subjectColumns.map(col => (
+                              <th key={col.subjectId} style={{ padding: '10px 8px', color: 'white', textAlign: 'center', fontWeight: 700, minWidth: '85px' }}>
+                                <div>{col.subjectCode || col.subjectName}</div>
+                                <div style={{ fontSize: '10px', opacity: 0.8, fontWeight: 400 }}>/{col.maxScore}</div>
+                              </th>
+                            ))}
+                            <th style={{ padding: '10px 12px', color: 'white', textAlign: 'center', fontWeight: 700, minWidth: '90px', background: 'rgba(255,255,255,0.15)' }}>TOTAL</th>
+                            <th style={{ padding: '10px 12px', color: 'white', textAlign: 'center', fontWeight: 700, minWidth: '65px', background: 'rgba(255,255,255,0.15)' }}>%</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                        </thead>
+                        <tbody>
+                          {rankedTotals.map((item, idx) => {
+                            const rank = rankMap[item.student.id];
+                            const rowBg = idx % 2 === 0 ? 'white' : '#FAFBFF';
+                            return (
+                              <tr key={item.student.id} style={{ background: rowBg, borderBottom: '1px solid #F0F0F0' }}>
+                                <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 800 }}>
+                                  {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : rank}
+                                </td>
+                                <td style={{ padding: '10px 12px' }}>
+                                  <div style={{ fontWeight: 700, color: '#1A202C', fontSize: '13px' }}>{item.student.name}</div>
+                                  <div style={{ fontSize: '10px', color: '#94A3B8' }}>{item.student.regNo || item.student.studentCode || item.student.id}</div>
+                                </td>
+                                {subjectColumns.map(col => {
+                                  const r = (resultsLookup[item.student.id] || {})[col.subjectId] || (resultsLookup[item.student.id] || {})[col.subjectName];
+                                  const score = displayScoreHelper(r);
+                                  const grade = displayGradeHelper(r);
+                                  const gStyle = gradeColorHelper(grade);
+                                  return (
+                                    <td key={col.subjectId} style={{ padding: '8px', textAlign: 'center' }}>
+                                      <div style={{ fontWeight: 700, fontSize: '13px', color: r?.absent || r?.isAbsent ? '#6B7280' : '#1A202C' }}>
+                                        {score}
+                                      </div>
+                                      <div style={{
+                                        fontSize: '10px', fontWeight: 700,
+                                        color: gStyle.color, background: gStyle.bg, border: `1px solid ${gStyle.border}`,
+                                        borderRadius: '4px', padding: '1px 5px', display: 'inline-block', marginTop: '2px'
+                                      }}>
+                                        {grade}
+                                      </div>
+                                    </td>
+                                  );
+                                })}
+                                <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 800, fontSize: '13px', color: '#4F46E5', background: '#EEF2FF' }}>
+                                  {item.totalScore} / {item.totalMax}
+                                </td>
+                                <td style={{
+                                  padding: '10px 12px', textAlign: 'center', fontWeight: 800, fontSize: '13px',
+                                  color: item.pct >= 75 ? '#059669' : item.pct >= 50 ? '#D97706' : '#DC2626',
+                                  background: '#EEF2FF'
+                                }}>
+                                  {item.pct}%
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '60px 20px', background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', color: '#94A3B8' }}>
+                    <div style={{ fontSize: '40px', marginBottom: '12px' }}>📋</div>
+                    <div style={{ fontSize: '15px', fontWeight: 600 }}>
+                      Select a Batch and Exam above to view the mark sheet
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* VIEW B — OVERALL BATCH RANKING */}
+            {rankViewMode === 'overall' && (
+              <div>
+                {/* STAT CARDS */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                  <div style={{ background: '#EEF2FF', borderRadius: '10px', padding: '14px 16px', border: '1px solid #C7D2FE' }}>
+                    <div style={{ fontSize: '22px', fontWeight: 800, color: '#4F46E5' }}>{filteredStudents.length}</div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#4338CA', textTransform: 'uppercase' }}>STUDENTS RANKED</div>
+                  </div>
+                  <div style={{ background: '#ECFDF5', borderRadius: '10px', padding: '14px 16px', border: '1px solid #A7F3D0' }}>
+                    <div style={{ fontSize: '22px', fontWeight: 800, color: '#059669' }}>
+                      {rankedTotals[0] ? `${rankedTotals[0].totalScore} / ${rankedTotals[0].totalMax}` : '—'}
+                    </div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#065F46', textTransform: 'uppercase' }}>HIGHEST AGGREGATE</div>
+                  </div>
+                  <div style={{ background: '#FEF3C7', borderRadius: '10px', padding: '14px 16px', border: '1px solid #FDE68A' }}>
+                    <div style={{ fontSize: '22px', fontWeight: 800, color: '#D97706' }}>
+                      {rankedTotals.length > 0 ? Math.round(rankedTotals.reduce((acc, curr) => acc + curr.pct, 0) / rankedTotals.length) : 0}%
+                    </div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#92400E', textTransform: 'uppercase' }}>CLASS AVERAGE</div>
+                  </div>
+                  <div style={{ background: '#F3E8FF', borderRadius: '10px', padding: '14px 16px', border: '1px solid #E9D5FF' }}>
+                    <div style={{ fontSize: '22px', fontWeight: 800, color: '#7C3AED' }}>{subjectColumns.length}</div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#6B21A8', textTransform: 'uppercase' }}>SUBJECTS INCLUDED</div>
+                  </div>
+                </div>
+
+                {/* OVERALL RANKING TABLE */}
+                <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+                  <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                      <thead>
+                        <tr style={{ background: '#F8FAFC', borderBottom: '1.5px solid #E2E8F0' }}>
+                          <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#64748B', width: '80px' }}>RANK</th>
+                          <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#64748B' }}>STUDENT NAME</th>
+                          <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#64748B', textAlign: 'center' }}>TOTAL MARKS</th>
+                          <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#64748B', textAlign: 'center' }}>PERCENTAGE</th>
+                          <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#64748B', textAlign: 'center' }}>GRADE BAND</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rankedTotals.map((item, idx) => {
+                          const rank = idx + 1;
+                          const band = item.pct >= 80 ? 'A' : item.pct >= 65 ? 'B' : item.pct >= 50 ? 'C' : item.pct >= 40 ? 'D' : 'F';
+                          const gStyle = gradeColorHelper(band);
+                          return (
+                            <tr key={item.student.id} style={{ borderBottom: '1px solid #F1F5F9', background: rank === 1 ? '#FEF3C720' : 'white' }}>
+                              <td style={{ padding: '12px 16px' }}>
+                                {rank === 1 ? <span style={{ background: '#FEF3C7', color: '#D97706', padding: '3px 10px', borderRadius: '20px', fontWeight: 800, fontSize: '11px' }}>🥇 #1</span>
+                                 : rank === 2 ? <span style={{ background: '#F1F5F9', color: '#475569', padding: '3px 10px', borderRadius: '20px', fontWeight: 800, fontSize: '11px' }}>🥈 #2</span>
+                                 : rank === 3 ? <span style={{ background: '#FFEDD5', color: '#EA580C', padding: '3px 10px', borderRadius: '20px', fontWeight: 800, fontSize: '11px' }}>🥉 #3</span>
+                                 : <strong style={{ color: '#64748B' }}>#{rank}</strong>}
+                              </td>
+                              <td style={{ padding: '12px 16px', fontWeight: 700, color: '#1A202C' }}>
+                                {item.student.name} <small style={{ color: '#94A3B8', fontFamily: 'monospace' }}>({item.student.regNo || item.student.id})</small>
+                              </td>
+                              <td style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 700, color: '#4F46E5' }}>
+                                {item.totalScore} / {item.totalMax}
+                              </td>
+                              <td style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 800, color: item.pct >= 75 ? '#059669' : item.pct >= 50 ? '#D97706' : '#DC2626' }}>
+                                {item.pct}%
+                              </td>
+                              <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                                <span style={{
+                                  background: gStyle.bg, color: gStyle.color, border: `1px solid ${gStyle.border}`,
+                                  padding: '3px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 700
+                                }}>
+                                  Grade {band}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
+            )}
 
-              {/* GRADE DISTRIBUTION BAR */}
-              <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', padding: '18px 22px' }}>
-                <h4 style={{ fontFamily: "'Sora',sans-serif", fontSize: '13px', fontWeight: 700, color: '#1A202C', marginBottom: '12px' }}>
-                  Grade Distribution Breakdown
-                </h4>
+            {/* VIEW C — BY SUBJECT */}
+            {rankViewMode === 'subject' && (() => {
+              const activeSubId = rankSubjectId || (subjectColumns[0]?.subjectId || '');
+              const activeSubjectCol = subjectColumns.find(col => col.subjectId === activeSubId) || subjectColumns[0];
 
-                {/* Segmented bar */}
-                <div style={{ display: 'flex', height: '14px', borderRadius: '7px', overflow: 'hidden', marginBottom: '14px', background: '#EDF2F7' }}>
-                  {Object.entries(gradeCounts).map(([g, count]) => {
-                    if (count === 0) return null;
-                    const pct = (count / currentBatchStudents.length) * 100;
-                    const gStyle = gradeColor(g);
-                    return (
-                      <div
-                        key={g}
-                        style={{ width: `${pct}%`, background: gStyle.color, title: `${g}: ${count} (${pct.toFixed(0)}%)` }}
-                      />
-                    );
-                  })}
+              // Subject results list
+              const subjectResults = (filteredStudents || []).map(st => {
+                const r = (resultsLookup[st.id] || {})[activeSubId] || (resultsLookup[st.id] || {})[activeSubjectCol?.subjectName];
+                const score = r?.score !== undefined ? r.score : (r?.marksObtained !== undefined ? r.marksObtained : r?.marks);
+                const isAbs = r?.absent || r?.isAbsent;
+                const grade = displayGradeHelper(r);
+                const maxScore = activeSubjectCol?.maxScore || 100;
+                const isPassed = !isAbs && score !== null && score !== undefined && Number(score) >= 50;
+
+                return {
+                  student: st,
+                  score: isAbs ? null : (score !== null && score !== undefined ? Number(score) : null),
+                  isAbsent: isAbs,
+                  grade,
+                  isPassed,
+                  maxScore
+                };
+              }).sort((a, b) => {
+                if (a.isAbsent && !b.isAbsent) return 1;
+                if (!a.isAbsent && b.isAbsent) return -1;
+                return (b.score || 0) - (a.score || 0);
+              });
+
+              const validScores = subjectResults.filter(r => !r.isAbsent && r.score !== null).map(r => r.score);
+              const subjAvg = validScores.length > 0 ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1) : '—';
+              const highestSubjMark = validScores.length > 0 ? Math.max(...validScores) : '—';
+              const passSubjCount = subjectResults.filter(r => r.isPassed).length;
+              const passSubjRate = subjectResults.length > 0 ? Math.round((passSubjCount / subjectResults.length) * 100) : 0;
+              const absentSubjCount = subjectResults.filter(r => r.isAbsent).length;
+
+              return (
+                <div>
+                  {/* SUBJECT STRIP */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
+                    {subjectColumns.map(col => (
+                      <button
+                        key={col.subjectId}
+                        onClick={() => setRankSubjectId(col.subjectId)}
+                        style={{
+                          padding: '8px 16px', borderRadius: '20px',
+                          fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                          border: activeSubId === col.subjectId ? 'none' : '1px solid #E2E8F0',
+                          background: activeSubId === col.subjectId ? '#4F46E5' : 'white',
+                          color: activeSubId === col.subjectId ? 'white' : '#64748B',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        {col.subjectCode} — {col.subjectName}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* SUBJECT STATS */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                    <div style={{ background: '#EBF4FF', borderRadius: '10px', padding: '14px 16px', border: '1px solid #BEE3F8' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 800, color: '#2B6CB0' }}>{subjAvg}</div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase' }}>CLASS AVERAGE</div>
+                    </div>
+                    <div style={{ background: '#F0FFF4', borderRadius: '10px', padding: '14px 16px', border: '1px solid #9AE6B4' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 800, color: '#2F855A' }}>{highestSubjMark}</div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase' }}>HIGHEST MARK</div>
+                    </div>
+                    <div style={{ background: '#FEF3C7', borderRadius: '10px', padding: '14px 16px', border: '1px solid #FDE68A' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 800, color: '#D97706' }}>{passSubjRate}%</div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase' }}>PASS RATE</div>
+                    </div>
+                    <div style={{ background: '#F8FAFC', borderRadius: '10px', padding: '14px 16px', border: '1px solid #E2E8F0' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 800, color: '#64748B' }}>{absentSubjCount}</div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase' }}>ABSENT</div>
+                    </div>
+                  </div>
+
+                  {/* SUBJECT RANKING TABLE */}
+                  <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+                    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                        <thead>
+                          <tr style={{ background: '#F8FAFC', borderBottom: '1.5px solid #E2E8F0' }}>
+                            <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#64748B', width: '80px' }}>RANK</th>
+                            <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#64748B' }}>STUDENT NAME</th>
+                            <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#64748B', textAlign: 'center' }}>MARKS / TOTAL</th>
+                            <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#64748B', textAlign: 'center' }}>GRADE</th>
+                            <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#64748B', textAlign: 'center' }}>STATUS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {subjectResults.map((r, idx) => {
+                            const rank = r.isAbsent ? '-' : idx + 1;
+                            const gStyle = gradeColorHelper(r.grade);
+                            return (
+                              <tr key={r.student.id} style={{ borderBottom: '1px solid #F1F5F9', background: rank === 1 ? '#FEF3C720' : 'white' }}>
+                                <td style={{ padding: '12px 16px' }}>
+                                  {rank === 1 ? <span style={{ background: '#FEF3C7', color: '#D97706', padding: '3px 10px', borderRadius: '20px', fontWeight: 800, fontSize: '11px' }}>🥇 #1</span>
+                                   : rank === 2 ? <span style={{ background: '#F1F5F9', color: '#475569', padding: '3px 10px', borderRadius: '20px', fontWeight: 800, fontSize: '11px' }}>🥈 #2</span>
+                                   : rank === 3 ? <span style={{ background: '#FFEDD5', color: '#EA580C', padding: '3px 10px', borderRadius: '20px', fontWeight: 800, fontSize: '11px' }}>🥉 #3</span>
+                                   : <strong style={{ color: '#64748B' }}>{rank !== '-' ? `#${rank}` : '-'}</strong>}
+                                </td>
+                                <td style={{ padding: '12px 16px', fontWeight: 700, color: '#1A202C' }}>
+                                  {r.student.name} <small style={{ color: '#94A3B8', fontFamily: 'monospace' }}>({r.student.regNo || r.student.id})</small>
+                                </td>
+                                <td style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 700, color: '#1A202C' }}>
+                                  {r.isAbsent ? 'ABS' : (r.score !== null ? `${r.score} / ${r.maxScore}` : '—')}
+                                </td>
+                                <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                                  <span style={{
+                                    background: gStyle.bg, color: gStyle.color, border: `1px solid ${gStyle.border}`,
+                                    padding: '3px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 700
+                                  }}>
+                                    {r.grade}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                                  {r.isAbsent ? (
+                                    <span style={{ background: '#F7FAFC', color: '#718096', border: '1px solid #E2E8F0', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>ABSENT</span>
+                                  ) : r.isPassed ? (
+                                    <span style={{ background: '#F0FFF4', color: '#2F855A', border: '1px solid #9AE6B4', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>PASS</span>
+                                  ) : (
+                                    <span style={{ background: '#FFF5F5', color: '#C53030', border: '1px solid #FEB2B2', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>FAIL</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
-
-                {/* Legend */}
-                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                  {Object.entries(gradeCounts).map(([g, count]) => {
-                    const gStyle = gradeColor(g);
-                    return (
-                      <div key={g} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#4A5568' }}>
-                        <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: gStyle.color }} />
-                        <strong>Grade {g}:</strong> {count}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      )}
+              );
+            })()}
+          </div>
+        );
+      })()}
 
       {/* SECTION 5 — SUBJECT PERFORMANCE TAB */}
       {activeTab === "performance" && (

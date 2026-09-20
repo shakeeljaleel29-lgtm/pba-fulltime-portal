@@ -123,6 +123,9 @@ const LecturerManagementViewInner = ({ isMobile }) => {
 
   // Session Log State
   const [logLecturerFilter, setLogLecturerFilter] = useState("All");
+  const [filterBatchId, setFilterBatchId] = useState("");
+  const [filterSubjectId, setFilterSubjectId] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
   const [logPeriod, setLogPeriod] = useState("This Month");
   const [logCustomFrom, setLogCustomFrom] = useState("");
   const [logCustomTo, setLogCustomTo] = useState("");
@@ -1564,9 +1567,9 @@ const LecturerManagementViewInner = ({ isMobile }) => {
 
       {/* TAB 5: SESSION LOG */}
       {activeTab === "sessionLog" && (() => {
-        const sessions = safeLS('pba_timetable_sessions', []);
+        const sessions = safeLS('pba_timetable_sessions', safeLS('pba_timetable', []));
         const classChanges = safeLS('pba_class_changes', []);
-        const attendanceList = safeLS('pba_session_attendance', []);
+        const attendanceList = safeLS('pba_session_attendance', safeLS('pba_attendance', []));
         const users = safeLS('pba_users', []);
         const subjects = safeLS('pba_subjects', []);
         const batches = safeLS('pba_batches', []);
@@ -1576,6 +1579,40 @@ const LecturerManagementViewInner = ({ isMobile }) => {
 
         const lecturerList = users.filter(u => u.role === 'Lecturer' || data?.lecturers?.some(l => l.id === u.id));
         const todayStr = new Date().toISOString().split('T')[0];
+
+        const resolveSubjectName = (sess) => {
+          if (sess.subjectName && sess.subjectName !== 'Unknown Subject') {
+            return sess.subjectName;
+          }
+          if (sess.subjectId) {
+            const sub = (subjects || []).find(s => s.id === sess.subjectId || s.code === sess.subjectId);
+            if (sub?.name) return sub.name;
+          }
+          if (sess.subjectId && sess.batchId) {
+            const batch = (batches || []).find(b => b.id === sess.batchId);
+            const bSub = (batch?.subjects || []).find(bs => bs.subjectId === sess.subjectId);
+            if (bSub?.subjectName) return bSub.subjectName;
+          }
+          return sess.batchName || '—';
+        };
+
+        const resolveBatchName = (sess) => {
+          if (sess.batchName && sess.batchName !== 'Unknown Batch') return sess.batchName;
+          if (sess.batchId) {
+            const batch = (batches || []).find(b => b.id === sess.batchId);
+            return batch?.name || '—';
+          }
+          return '—';
+        };
+
+        const subjectOptions = filterBatchId
+          ? (() => {
+              const batch = (batches || []).find(b => b.id === filterBatchId);
+              return (batch?.subjects || []).map(bs => ({
+                id: bs.subjectId || bs.id, name: bs.subjectName || bs.name
+              })).filter(s => s.id);
+            })()
+          : (subjects || []).map(s => ({ id: s.id, name: s.name }));
 
         // Determine date bounds
         let startDate = new Date();
@@ -1610,8 +1647,10 @@ const LecturerManagementViewInner = ({ isMobile }) => {
           const dStr = curr.toISOString().split('T')[0];
           const dayName = dayNames[curr.getDay()];
 
-          sessions.forEach(sess => {
-            if (logLecturerFilter !== "All" && sess.lecturerId !== logLecturerFilter) return;
+          (sessions || []).forEach(sess => {
+            if (logLecturerFilter && logLecturerFilter !== "All" && sess.lecturerId !== logLecturerFilter) return;
+            if (filterBatchId && sess.batchId !== filterBatchId) return;
+            if (filterSubjectId && sess.subjectId !== filterSubjectId) return;
 
             let matches = false;
             if (sess.isMakeup && sess.date) {
@@ -1624,8 +1663,6 @@ const LecturerManagementViewInner = ({ isMobile }) => {
 
             // Resolve entities
             const lectObj = users.find(u => u.id === sess.lecturerId) || (data?.lecturers || []).find(l => l.id === sess.lecturerId);
-            const subjObj = subjects.find(s => s.id === sess.subjectId || s.code === sess.subjectId);
-            const batchObj = batches.find(b => b.id === sess.batchId);
             const roomObj = classrooms.find(r => r.id === sess.classroomId);
 
             // Check class changes
@@ -1651,8 +1688,13 @@ const LecturerManagementViewInner = ({ isMobile }) => {
               statusStyle = { background: '#EBF4FF', color: '#2B6CB0' };
             }
 
+            if (filterStatus) {
+              const sessionStatus = (status || '').toLowerCase();
+              if (!sessionStatus.includes(filterStatus.toLowerCase())) return;
+            }
+
             // Attendance
-            const attRec = attendanceList.find(a => a.sessionId === sess.id && a.date === dStr);
+            const attRec = attendanceList.find(a => (a.sessionId === sess.id || a.sessionId === sess.sessionId) && a.date === dStr);
             let attendanceStr = '—';
             if (attRec && Array.isArray(attRec.records)) {
               const presentCount = attRec.records.filter(r => r.status === 'present' || r.status === 'late').length;
@@ -1670,9 +1712,9 @@ const LecturerManagementViewInner = ({ isMobile }) => {
               rawDate: dStr,
               dateDisplay,
               dayName,
-              lecturerName: lectObj?.name || 'Unknown Lecturer',
-              batchName: batchObj?.name || 'Unknown Batch',
-              subjectName: subjObj?.name || 'Unknown Subject',
+              lecturerName: lectObj?.name || sess.lecturerName || 'Unknown Lecturer',
+              batchName: resolveBatchName(sess),
+              subjectName: resolveSubjectName(sess),
               timeDisplay: `${sess.startTime || ''} – ${sess.endTime || ''}`,
               classroomName: roomObj?.name || sess.classroomId || '—',
               status,
@@ -1685,7 +1727,7 @@ const LecturerManagementViewInner = ({ isMobile }) => {
           curr.setDate(curr.getDate() + 1);
         }
 
-        // Stats calculation over ALL generated rows for selected lecturer/period
+        // Stats calculation over ALL generated rows for selected filters
         const totalScheduled = allLogRows.length;
         const totalConducted = allLogRows.filter(r => r.status === 'Conducted').length;
         const totalMissed = allLogRows.filter(r => r.status === 'Cancelled').length;
@@ -1726,7 +1768,7 @@ const LecturerManagementViewInner = ({ isMobile }) => {
           const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
-          const lectName = logLecturerFilter === 'All' ? 'AllLecturers' : (users.find(u => u.id === logLecturerFilter)?.name || 'Lecturer').replace(/\s+/g, '_');
+          const lectName = (logLecturerFilter === 'All' || !logLecturerFilter) ? 'AllLecturers' : (users.find(u => u.id === logLecturerFilter)?.name || 'Lecturer').replace(/\s+/g, '_');
           link.setAttribute('href', url);
           link.setAttribute('download', `session-log-${lectName}-${logPeriod.replace(/\s+/g, '_')}.csv`);
           document.body.appendChild(link);
@@ -1752,54 +1794,125 @@ const LecturerManagementViewInner = ({ isMobile }) => {
 
             <div style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: "16px" }}>
               {/* FILTER BAR */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: '#F8FAFC', padding: '14px 16px', borderRadius: '10px', border: '1px solid #E3E6EA' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                  {/* Lecturer dropdown */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 700, color: '#4A5568' }}>Lecturer:</label>
-                    <select
-                      value={logLecturerFilter}
-                      onChange={e => { setLogLecturerFilter(e.target.value); setLogPage(1); }}
-                      style={{ padding: '7px 12px', borderRadius: '8px', border: '1.5px solid #E3E6EA', fontSize: '13px', outline: 'none' }}
-                    >
-                      <option value="All">All Lecturers</option>
-                      {lecturerList.map(l => (
-                        <option key={l.id} value={l.id}>{l.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Period quick-select pills */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {['This Week', 'This Month', 'This Year', 'Custom Range'].map(p => (
-                      <button
-                        key={p}
-                        onClick={() => { setLogPeriod(p); setLogPage(1); }}
-                        style={{
-                          padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
-                          background: logPeriod === p ? '#2B6CB0' : '#F0F2F5',
-                          color: logPeriod === p ? '#FFFFFF' : '#4A5568'
-                        }}
-                      >
-                        {p}
-                      </button>
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center',
+                padding: '14px 16px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0'
+              }}>
+                {/* Lecturer dropdown */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', whiteSpace: 'nowrap' }}>Lecturer:</span>
+                  <select
+                    value={logLecturerFilter}
+                    onChange={e => { setLogLecturerFilter(e.target.value); setLogPage(1); }}
+                    style={{ fontSize: '12px', padding: '6px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', color: '#1A202C', cursor: 'pointer', background: 'white' }}
+                  >
+                    <option value="All">All Lecturers</option>
+                    {lecturerList.map(l => (
+                      <option key={l.id} value={l.id}>{l.name}</option>
                     ))}
-                  </div>
+                  </select>
                 </div>
 
-                {/* Custom Range row */}
-                {logPeriod === 'Custom Range' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingTop: '8px', borderTop: '1px solid #E3E6EA' }}>
-                    <label style={{ fontSize: '12px', color: '#4A5568' }}>From:</label>
-                    <input type="date" value={logCustomFrom} onChange={e => setLogCustomFrom(e.target.value)} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #CBD5E0', fontSize: '12px' }} />
-                    <label style={{ fontSize: '12px', color: '#4A5568' }}>To:</label>
-                    <input type="date" value={logCustomTo} onChange={e => setLogCustomTo(e.target.value)} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #CBD5E0', fontSize: '12px' }} />
-                    <button onClick={() => setLogPage(1)} style={{ padding: '5px 14px', background: '#2B6CB0', color: '#FFF', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-                      Apply
+                {/* Batch dropdown */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', whiteSpace: 'nowrap' }}>Batch:</span>
+                  <select
+                    value={filterBatchId}
+                    onChange={e => { setFilterBatchId(e.target.value); setFilterSubjectId(''); setLogPage(1); }}
+                    style={{ fontSize: '12px', padding: '6px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', color: '#1A202C', cursor: 'pointer', background: 'white' }}
+                  >
+                    <option value="">All Batches</option>
+                    {(batches || []).map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Subject dropdown */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', whiteSpace: 'nowrap' }}>Subject:</span>
+                  <select
+                    value={filterSubjectId}
+                    onChange={e => { setFilterSubjectId(e.target.value); setLogPage(1); }}
+                    disabled={subjectOptions.length === 0}
+                    style={{
+                      fontSize: '12px', padding: '6px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', color: '#1A202C', cursor: 'pointer', background: 'white',
+                      opacity: subjectOptions.length === 0 ? 0.5 : 1
+                    }}
+                  >
+                    <option value="">All Subjects</option>
+                    {subjectOptions.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Status dropdown */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', whiteSpace: 'nowrap' }}>Status:</span>
+                  <select
+                    value={filterStatus}
+                    onChange={e => { setFilterStatus(e.target.value); setLogPage(1); }}
+                    style={{ fontSize: '12px', padding: '6px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', color: '#1A202C', cursor: 'pointer', background: 'white' }}
+                  >
+                    <option value="">All Statuses</option>
+                    <option value="conducted">✓ Conducted</option>
+                    <option value="cancelled">✕ Missed / Cancelled</option>
+                    <option value="substituted">⇄ Substituted</option>
+                  </select>
+                </div>
+
+                {/* Period quick-select pills */}
+                <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto', flexWrap: 'wrap' }}>
+                  {['This Week', 'This Month', 'This Year', 'Custom Range'].map(p => (
+                    <button
+                      key={p}
+                      onClick={() => { setLogPeriod(p); setLogPage(1); }}
+                      style={{
+                        padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                        border: logPeriod === p ? 'none' : '1px solid #E2E8F0',
+                        background: logPeriod === p ? '#4F46E5' : 'white',
+                        color: logPeriod === p ? 'white' : '#64748B',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {p}
                     </button>
-                  </div>
+                  ))}
+                </div>
+
+                {/* Clear filters button */}
+                {(logLecturerFilter !== "All" || filterBatchId || filterSubjectId || filterStatus) && (
+                  <button
+                    onClick={() => {
+                      setLogLecturerFilter("All");
+                      setFilterBatchId("");
+                      setFilterSubjectId("");
+                      setFilterStatus("");
+                      setLogPage(1);
+                    }}
+                    style={{
+                      padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                      border: '1px solid #FCA5A5', background: '#FFF5F5', color: '#DC2626'
+                    }}
+                  >
+                    ✕ Clear Filters
+                  </button>
                 )}
               </div>
+
+              {/* Custom Range row */}
+              {logPeriod === 'Custom Range' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E3E6EA' }}>
+                  <label style={{ fontSize: '12px', color: '#4A5568' }}>From:</label>
+                  <input type="date" value={logCustomFrom} onChange={e => setLogCustomFrom(e.target.value)} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #CBD5E0', fontSize: '12px' }} />
+                  <label style={{ fontSize: '12px', color: '#4A5568' }}>To:</label>
+                  <input type="date" value={logCustomTo} onChange={e => setLogCustomTo(e.target.value)} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #CBD5E0', fontSize: '12px' }} />
+                  <button onClick={() => setLogPage(1)} style={{ padding: '5px 14px', background: '#2B6CB0', color: '#FFF', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                    Apply
+                  </button>
+                </div>
+              )}
 
               {/* STATS ROW */}
               <div style={{ display: 'flex', gap: '12px' }}>
@@ -1859,7 +1972,7 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                           <td style={{ padding: '10px 14px', fontWeight: 600, color: '#1A202C' }}>{r.dateDisplay}</td>
                           <td style={{ padding: '10px 14px', color: '#4A5568' }}>{r.dayName}</td>
                           <td style={{ padding: '10px 14px', color: '#4A5568' }}>{r.batchName}</td>
-                          <td style={{ padding: '10px 14px', fontWeight: 600, color: '#2B6CB0' }}>{r.subjectName}</td>
+                          <td style={{ padding: '10px 14px', fontWeight: 600, color: '#4F46E5' }}>{r.subjectName}</td>
                           <td style={{ padding: '10px 14px', color: '#4A5568' }}>{r.timeDisplay}</td>
                           <td style={{ padding: '10px 14px', color: '#4A5568' }}>{r.classroomName}</td>
                           <td style={{ padding: '10px 14px' }}>
