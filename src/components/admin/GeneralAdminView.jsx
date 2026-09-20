@@ -486,11 +486,55 @@ export const GeneralAdminView = ({ isMobile }) => {
     ).length;
   };
 
-  // Daily Allocations Sheet State
+  // Daily Allocations Sheet & Week Offset State
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [quickRoomSession, setQuickRoomSession] = useState(null);
+  const [quickRoomId, setQuickRoomId] = useState('');
+  const [quickRoomScope, setQuickRoomScope] = useState('week');
+
   const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const [allocDay, setAllocDay] = useState(todayDayName);
   const [allocationDate, setAllocationDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [selectedClassroomForSchedule, setSelectedClassroomForSchedule] = useState("All");
+
+  const getWeekStart = (offset) => {
+    const today = new Date();
+    const day = today.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    const d = new Date(today);
+    d.setDate(today.getDate() + mondayOffset + (offset * 7));
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  const weekStart = getWeekStart(weekOffset);
+  const weekStartStr = weekStart.toISOString().slice(0, 10); // 'YYYY-MM-DD'
+
+  const weekLabel = `Week of ${weekStart.getDate()} ${
+    weekStart.toLocaleDateString('en-US', { month: 'short' })
+  } ${weekStart.getFullYear()}`;
+
+  const getDayDate = (dayIndex) => {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + dayIndex);
+    return d.getDate() + ' ' +
+      d.toLocaleDateString('en-US', { month: 'short' });
+  };
+
+  const resolveClassroom = (session, weekStartStr) => {
+    const overrides = safeLS('pba_classroom_overrides', []);
+    const override = (overrides || []).find(
+      o => o.sessionId === session.id && o.weekStart === weekStartStr
+    );
+    if (override) {
+      return { classroomId: override.classroomId,
+               classroomName: override.classroomName,
+               isOverride: true };
+    }
+    return { classroomId: session.classroomId,
+             classroomName: session.classroomName,
+             isOverride: false };
+  };
 
   const allocSessions = (() => {
     const timetable = safeLS('pba_timetable', []);
@@ -2408,8 +2452,8 @@ export const GeneralAdminView = ({ isMobile }) => {
           {/* Daily Allocation Sheet */}
           <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', padding: '18px' }}>
             <div style={{
-              display: 'flex', alignItems: 'center', gap: '16px',
-              marginBottom: '16px', flexWrap: 'wrap'
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: '16px', flexWrap: 'wrap', gap: '12px'
             }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800,
@@ -2417,47 +2461,85 @@ export const GeneralAdminView = ({ isMobile }) => {
                   Daily Allocation Sheet
                 </h3>
                 <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#6B7280' }}>
-                  Classroom usage schedule for the selected day
+                  Classroom usage schedule for the selected week & day
                 </p>
               </div>
 
-              {/* Day picker */}
-              <select
-                value={allocDay}
-                onChange={e => setAllocDay(e.target.value)}
-                style={{
-                  padding: '8px 14px', borderRadius: '8px',
-                  border: '1px solid #E3E6EA', fontSize: '13px',
-                  fontWeight: 700, background: 'white', color: '#1A202C',
-                  cursor: 'pointer'
-                }}>
-                {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
-                  .map(d => (
-                    <option key={d} value={d}>
-                      {d}{d === todayDayName ? ' (Today)' : ''}
-                    </option>
-                  ))}
-              </select>
+              {/* Week Navigation */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset(prev => prev - 1)}
+                  style={{
+                    padding: '6px 12px', borderRadius: '6px',
+                    border: '1px solid #E3E6EA', background: 'white',
+                    fontSize: '12px', fontWeight: 600, cursor: 'pointer', color: '#374151'
+                  }}>
+                  ← Prev Week
+                </button>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#1A202C' }}>
+                  {weekLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset(prev => prev + 1)}
+                  style={{
+                    padding: '6px 12px', borderRadius: '6px',
+                    border: '1px solid #E3E6EA', background: 'white',
+                    fontSize: '12px', fontWeight: 600, cursor: 'pointer', color: '#374151'
+                  }}>
+                  Next Week →
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset(0)}
+                  style={{
+                    padding: '6px 10px', borderRadius: '6px',
+                    border: '1px solid #C7D2FE', background: '#EEF2FF',
+                    color: '#4F46E5', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                  }}>
+                  Today
+                </button>
+              </div>
 
-              {/* WhatsApp share button */}
-              <button
-                onClick={() => {
-                  const rows = allocSessions.map(s =>
-                    `${s.startTime || ''}–${s.endTime || ''} | ${s.classroomName || '— Not set —'} | ${s.batchName || ''} | ${s.subjectName || ''} | ${s.lecturerName || ''}`
-                  ).join('\n');
-                  const text = `📋 Daily Allocation Sheet — ${allocDay}\n\n` +
-                    (rows || 'No sessions scheduled.') +
-                    `\n\nPBA Full-Time Portal`;
-                  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-                }}
-                style={{
-                  padding: '8px 16px', borderRadius: '8px',
-                  background: '#25D366', border: 'none', color: 'white',
-                  fontSize: '12px', fontWeight: 700, cursor: 'pointer',
-                  marginLeft: 'auto'
-                }}>
-                📤 Share via WhatsApp
-              </button>
+              {/* Day picker & Share */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <select
+                  value={allocDay}
+                  onChange={e => setAllocDay(e.target.value)}
+                  style={{
+                    padding: '8px 14px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '13px',
+                    fontWeight: 700, background: 'white', color: '#1A202C',
+                    cursor: 'pointer'
+                  }}>
+                  {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+                    .map((d, idx) => (
+                      <option key={d} value={d}>
+                        {d} ({getDayDate(idx)})
+                      </option>
+                    ))}
+                </select>
+
+                <button
+                  onClick={() => {
+                    const rows = allocSessions.map(s => {
+                      const room = resolveClassroom(s, weekStartStr);
+                      return `${s.startTime || ''}–${s.endTime || ''} | ${room.classroomName || '— Not set —'} | ${s.batchName || ''} | ${s.subjectName || ''} | ${s.lecturerName || ''}`;
+                    }).join('\n');
+                    const text = `📋 Daily Allocation Sheet — ${allocDay} (${weekStartStr})\n\n` +
+                      (rows || 'No sessions scheduled.') +
+                      `\n\nPBA Full-Time Portal`;
+                    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                  }}
+                  style={{
+                    padding: '8px 16px', borderRadius: '8px',
+                    background: '#25D366', border: 'none', color: 'white',
+                    fontSize: '12px', fontWeight: 700, cursor: 'pointer'
+                  }}>
+                  📤 Share via WhatsApp
+                </button>
+              </div>
             </div>
 
             <div style={{ overflowX: 'auto' }}>
@@ -2487,7 +2569,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                       }}>
                         <div style={{ fontSize: '28px', marginBottom: '8px' }}>📋</div>
                         <div style={{ fontWeight: 600, marginBottom: '4px' }}>
-                          No sessions scheduled for {allocDay}
+                          No sessions scheduled for {allocDay} ({weekStartStr})
                         </div>
                         <div style={{ fontSize: '12px' }}>
                           Sessions are added via the Visual Timetable Builder.
@@ -2495,44 +2577,75 @@ export const GeneralAdminView = ({ isMobile }) => {
                       </td>
                     </tr>
                   ) : (
-                    allocSessions.map((s, i) => (
-                      <tr key={s.id || i} style={{
-                        borderBottom: '1px solid #F3F4F6',
-                        background: i % 2 === 0 ? 'white' : '#FAFAFA'
-                      }}>
-                        <td style={{ padding: '10px 14px', fontWeight: 600,
-                          color: '#1A202C', whiteSpace: 'nowrap' }}>
-                          {s.startTime || '—'}{s.endTime ? `–${s.endTime}` : ''}
-                        </td>
-                        <td style={{ padding: '10px 14px', color: '#374151' }}>
-                          {s.classroomName || (
-                            <span style={{ color: '#D97706', fontSize: '11px',
-                              fontStyle: 'italic' }}>
-                              — Not set
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ padding: '10px 14px', color: '#374151' }}>
-                          {s.batchName || '—'}
-                        </td>
-                        <td style={{ padding: '10px 14px', color: '#374151' }}>
-                          {s.subjectName || (
-                            <span style={{ color: '#9CA3AF', fontStyle: 'italic' }}>
-                              — No subject
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ padding: '10px 14px', color: '#374151' }}>
-                          {s.lecturerName || '—'}
-                          {(s.assistants || []).length > 0 && (
-                            <div style={{ fontSize: '11px', color: '#6B7280',
-                              marginTop: '2px' }}>
-                              + {(s.assistants || []).map(a => a.lecturerName).join(', ')}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))
+                    allocSessions.map((s, i) => {
+                      const room = resolveClassroom(s, weekStartStr);
+                      return (
+                        <tr key={s.id || i} style={{
+                          borderBottom: '1px solid #F3F4F6',
+                          background: i % 2 === 0 ? 'white' : '#FAFAFA'
+                        }}>
+                          <td style={{ padding: '10px 14px', fontWeight: 600,
+                            color: '#1A202C', whiteSpace: 'nowrap' }}>
+                            {s.startTime || '—'}{s.endTime ? `–${s.endTime}` : ''}
+                          </td>
+                          <td style={{ padding: '10px 14px', color: '#374151' }}>
+                            {room.classroomId ? (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: room.isOverride ? '#4F46E5' : '#10B981', flexShrink: 0 }} />
+                                {room.classroomName || room.classroomId}
+                                {room.isOverride && (
+                                  <span style={{
+                                    marginLeft: '6px', padding: '1px 5px',
+                                    borderRadius: '6px', background: '#EEF2FF',
+                                    color: '#4F46E5', fontSize: '9px', fontWeight: 700
+                                  }}>THIS WEEK</span>
+                                )}
+                              </span>
+                            ) : (
+                              <span style={{ color: '#F59E0B', fontStyle: 'italic', fontSize: '12px' }}>— Not set —</span>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setQuickRoomSession({
+                                  session: s,
+                                  currentRoom: room,
+                                  weekStartStr
+                                });
+                                setQuickRoomId(room.classroomId || '');
+                              }}
+                              style={{
+                                marginLeft: '8px', padding: '2px 7px', fontSize: '9px',
+                                fontWeight: 700, borderRadius: '5px', cursor: 'pointer',
+                                background: 'transparent',
+                                border: '1px dashed #D1D5DB',
+                                color: '#6B7280'
+                              }}>
+                              {room.classroomId ? '↕ Change Room' : '+ Assign Room'}
+                            </button>
+                          </td>
+                          <td style={{ padding: '10px 14px', color: '#374151' }}>
+                            {s.batchName || '—'}
+                          </td>
+                          <td style={{ padding: '10px 14px', color: '#374151' }}>
+                            {s.subjectName || (
+                              <span style={{ color: '#9CA3AF', fontStyle: 'italic' }}>
+                                — No subject
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px 14px', color: '#374151' }}>
+                            {s.lecturerName || '—'}
+                            {(s.assistants || []).length > 0 && (
+                              <div style={{ fontSize: '11px', color: '#6B7280',
+                                marginTop: '2px' }}>
+                                + {(s.assistants || []).map(a => a.lecturerName).join(', ')}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -4837,6 +4950,180 @@ export const GeneralAdminView = ({ isMobile }) => {
                   color: 'white', fontSize: '13px', fontWeight: 700,
                   cursor: 'pointer' }}>
                 {(deactivateTarget.status ? deactivateTarget.status === 'Active' : deactivateTarget.isActive !== false) ? 'Deactivate' : 'Reactivate'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── QUICK CLASSROOM REASSIGN MODAL ── */}
+      {quickRoomSession && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+          zIndex: 9990, display: 'flex', alignItems: 'center',
+          justifyContent: 'center', padding: '20px'
+        }}>
+          <div style={{
+            background: 'white', borderRadius: '16px', padding: '28px',
+            width: '100%', maxWidth: '400px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
+          }}>
+            <h3 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 800,
+              color: '#111827' }}>
+              Change Classroom
+            </h3>
+            <p style={{ margin: '0 0 20px', fontSize: '12px', color: '#6B7280' }}>
+              {quickRoomSession.session.subjectName ||
+               quickRoomSession.session.batchName} ·{' '}
+              {quickRoomSession.session.day}{' '}
+              {quickRoomSession.session.startTime}–
+              {quickRoomSession.session.endTime}
+            </p>
+
+            {/* Current room */}
+            {quickRoomSession.currentRoom.classroomId && (
+              <div style={{
+                marginBottom: '16px', padding: '10px 12px',
+                background: '#F9FAFB', borderRadius: '8px',
+                fontSize: '12px', color: '#6B7280'
+              }}>
+                Current: <strong style={{ color: '#374151' }}>
+                  {quickRoomSession.currentRoom.classroomName}
+                </strong>
+                {quickRoomSession.currentRoom.isOverride &&
+                  ' (this week override)'}
+              </div>
+            )}
+
+            {/* Classroom selector */}
+            <label style={{ fontSize: '12px', fontWeight: 700,
+              color: '#374151', textTransform: 'uppercase',
+              letterSpacing: '0.05em', display: 'block',
+              marginBottom: '6px' }}>
+              NEW CLASSROOM
+            </label>
+            <select
+              value={quickRoomId}
+              onChange={e => setQuickRoomId(e.target.value)}
+              style={{
+                width: '100%', padding: '10px 12px', borderRadius: '8px',
+                border: '1px solid #E3E6EA', fontSize: '14px',
+                background: 'white', marginBottom: '16px'
+              }}>
+              <option value="">— Select Classroom —</option>
+              {(classrooms || []).map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+
+            {/* Scope: this week only vs. update default */}
+            <label style={{ fontSize: '12px', fontWeight: 700,
+              color: '#374151', textTransform: 'uppercase',
+              letterSpacing: '0.05em', display: 'block',
+              marginBottom: '8px' }}>
+              APPLY TO
+            </label>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+              <label style={{
+                flex: 1, display: 'flex', alignItems: 'center', gap: '8px',
+                padding: '10px 12px', borderRadius: '8px', cursor: 'pointer',
+                border: quickRoomScope === 'week'
+                  ? '2px solid #4F46E5' : '1px solid #E3E6EA',
+                background: quickRoomScope === 'week' ? '#EEF2FF' : 'white'
+              }}>
+                <input type="radio" name="scope" value="week"
+                  checked={quickRoomScope === 'week'}
+                  onChange={() => setQuickRoomScope('week')} />
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: 700,
+                    color: '#374151' }}>This week only</div>
+                  <div style={{ fontSize: '10px', color: '#9CA3AF' }}>
+                    {quickRoomSession.weekStartStr}
+                  </div>
+                </div>
+              </label>
+              <label style={{
+                flex: 1, display: 'flex', alignItems: 'center', gap: '8px',
+                padding: '10px 12px', borderRadius: '8px', cursor: 'pointer',
+                border: quickRoomScope === 'default'
+                  ? '2px solid #4F46E5' : '1px solid #E3E6EA',
+                background: quickRoomScope === 'default' ? '#EEF2FF' : 'white'
+              }}>
+                <input type="radio" name="scope" value="default"
+                  checked={quickRoomScope === 'default'}
+                  onChange={() => setQuickRoomScope('default')} />
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: 700,
+                    color: '#374151' }}>Update default</div>
+                  <div style={{ fontSize: '10px', color: '#9CA3AF' }}>
+                    All future weeks
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => {
+                  if (!quickRoomId) return;
+                  const classroom = (classrooms || [])
+                    .find(c => c.id === quickRoomId);
+                  if (!classroom) return;
+
+                  if (quickRoomScope === 'week') {
+                    // Save a per-week override
+                    const overrides = safeLS('pba_classroom_overrides', []);
+                    const cleaned = (overrides || []).filter(
+                      o => !(o.sessionId === quickRoomSession.session.id &&
+                             o.weekStart === quickRoomSession.weekStartStr)
+                    );
+                    saveLS('pba_classroom_overrides', [
+                      ...cleaned,
+                      {
+                        sessionId: quickRoomSession.session.id,
+                        weekStart: quickRoomSession.weekStartStr,
+                        classroomId: classroom.id,
+                        classroomName: classroom.name
+                      }
+                    ]);
+                  } else {
+                    // Update the session's default classroom
+                    const timetable = safeLS('pba_timetable', []);
+                    const updated = (timetable || []).map(s =>
+                      s.id === quickRoomSession.session.id
+                        ? { ...s,
+                            classroomId: classroom.id,
+                            classroomName: classroom.name }
+                        : s
+                    );
+                    saveLS('pba_timetable', updated);
+                    if (typeof setTimetable === 'function') {
+                      setTimetable(updated);
+                    }
+                  }
+
+                  setQuickRoomSession(null);
+                  setQuickRoomId('');
+                  setQuickRoomScope('week');
+                }}
+                style={{
+                  flex: 1, padding: '10px', borderRadius: '8px',
+                  background: '#4F46E5', color: 'white', border: 'none',
+                  fontWeight: 700, fontSize: '14px', cursor: 'pointer'
+                }}>
+                Save
+              </button>
+              <button
+                onClick={() => {
+                  setQuickRoomSession(null);
+                  setQuickRoomId('');
+                  setQuickRoomScope('week');
+                }}
+                style={{
+                  padding: '10px 16px', borderRadius: '8px',
+                  background: '#F3F4F6', border: '1px solid #E3E6EA',
+                  color: '#374151', fontWeight: 600, fontSize: '14px',
+                  cursor: 'pointer'
+                }}>
+                Cancel
               </button>
             </div>
           </div>
