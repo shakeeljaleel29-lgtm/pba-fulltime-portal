@@ -1363,7 +1363,26 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                       >
                         <td style={{ padding: '13px 16px', textAlign: 'left', borderBottom: '1px solid #F4F5F7' }}>
-                          <strong style={{ fontSize: "13px", color: theme.textPrimary }}>{lec.name}</strong>
+                          <strong style={{ fontSize: "13px", color: theme.textPrimary }}>
+                            {lec.name}
+                            {(() => {
+                              const allBatches = safeLS('pba_batches', []);
+                              const isAssistant = (allBatches || []).some(b =>
+                                (b.subjects || b.batchSubjects || []).some(bs =>
+                                  (bs.assistants || []).some(a => a.lecturerId === lec.id) || bs.assistantId === lec.id
+                                )
+                              );
+                              return isAssistant ? (
+                                <span style={{
+                                  fontSize: '9px', fontWeight: 700, padding: '1px 5px',
+                                  borderRadius: '8px', background: '#F0FDF4', color: '#15803D',
+                                  border: '1px solid #86EFAC', marginLeft: '4px'
+                                }}>
+                                  Asst.
+                                </span>
+                              ) : null;
+                            })()}
+                          </strong>
                           <div style={{ fontSize: "11px", color: theme.accent, fontWeight: 500 }}>{getLecturerSubjects(lec).join(", ")}</div>
                         </td>
                         {gridDays.map((day) => {
@@ -1725,7 +1744,9 @@ const LecturerManagementViewInner = ({ isMobile }) => {
               status,
               statusText,
               statusStyle,
-              attendanceStr
+              attendanceStr,
+              isExtra: !!sess.isExtra,
+              extraNote: sess.extraNote || ''
             });
           });
 
@@ -1737,6 +1758,7 @@ const LecturerManagementViewInner = ({ isMobile }) => {
         const totalConducted = allLogRows.filter(r => r.status === 'Conducted').length;
         const totalMissed = allLogRows.filter(r => r.status === 'Cancelled').length;
         const totalSubstituted = allLogRows.filter(r => r.status === 'Substituted').length;
+        const totalExtra = allLogRows.filter(r => r.isExtra).length;
         const attendRate = totalScheduled > 0 ? Math.round((totalConducted / totalScheduled) * 100) : 0;
         const attendRateColor = attendRate >= 80 ? '#276749' : attendRate >= 60 ? '#B7860A' : '#C53030';
 
@@ -1920,26 +1942,31 @@ const LecturerManagementViewInner = ({ isMobile }) => {
               )}
 
               {/* STATS ROW */}
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div style={{ flex: 1, background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: '120px', background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
                   <div style={{ fontSize: '22px', fontWeight: 800, color: '#1A202C' }}>{totalScheduled}</div>
                   <div style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>SCHEDULED</div>
                 </div>
-                <div style={{ flex: 1, background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
+                <div style={{ flex: 1, minWidth: '120px', background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
                   <div style={{ fontSize: '22px', fontWeight: 800, color: '#276749' }}>{totalConducted}</div>
                   <div style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>CONDUCTED</div>
                 </div>
-                <div style={{ flex: 1, background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
+                <div style={{ flex: 1, minWidth: '120px', background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
                   <div style={{ fontSize: '22px', fontWeight: 800, color: '#C53030' }}>{totalMissed}</div>
                   <div style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>MISSED</div>
                 </div>
-                <div style={{ flex: 1, background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
+                <div style={{ flex: 1, minWidth: '120px', background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
                   <div style={{ fontSize: '22px', fontWeight: 800, color: '#B7860A' }}>{totalSubstituted}</div>
                   <div style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>SUBSTITUTED</div>
                 </div>
-                <div style={{ flex: 1, background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
+                <div style={{ flex: 1, minWidth: '120px', background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
                   <div style={{ fontSize: '22px', fontWeight: 800, color: attendRateColor }}>{attendRate}%</div>
                   <div style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>ATTEND RATE</div>
+                </div>
+                <div style={{ flex: 1, minWidth: '130px', background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)', border: '1px solid #FDE68A', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '22px', fontWeight: 900, color: '#D97706' }}>{totalExtra}</div>
+                  <div style={{ fontSize: '10px', color: '#92400E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>⚡ EXTRA CLASSES</div>
+                  <div style={{ fontSize: '9px', color: '#B45309', marginTop: '2px' }}>above weekly limit</div>
                 </div>
               </div>
 
@@ -1987,6 +2014,21 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                             }}>
                               {r.statusText}
                             </span>
+                            {r.isExtra && (
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '2px 8px',
+                                borderRadius: '12px',
+                                background: '#FEF3C7',
+                                border: '1px solid #F59E0B',
+                                color: '#92400E',
+                                fontSize: '10px',
+                                fontWeight: 800,
+                                marginLeft: '6px'
+                              }} title={r.extraNote || 'Extra class above limit'}>
+                                ⚡ EXTRA
+                              </span>
+                            )}
                           </td>
                           <td style={{ padding: '10px 14px', fontWeight: 600, color: r.attendanceStr === '—' ? '#A0AEC0' : '#276749' }}>
                             {r.attendanceStr}

@@ -52,6 +52,41 @@ export const saveLS = (key, value) => {
   } catch {}
 };
 
+export const checkIfExtraClass = (newSession, batchList, timetableList) => {
+  if (!newSession) return false;
+  const batches = Array.isArray(batchList) && batchList.length > 0 ? batchList : safeLS('pba_batches', []);
+  const timetable = Array.isArray(timetableList) && timetableList.length > 0 ? timetableList : safeLS('pba_timetable', []);
+
+  const batch = (batches || []).find(b => b.id === newSession.batchId || b.name === newSession.batchName);
+  const batchSubjects = batch?.subjects || batch?.batchSubjects || [];
+  const batchSubject = (batchSubjects || []).find(
+    bs => bs.subjectId === newSession.subjectId || bs.subjectName === newSession.subjectName || bs.subjectCode === newSession.subjectCode
+  );
+  const limit = batchSubject?.classesPerWeek;
+  if (!limit) return false;
+
+  const sessionDate = new Date(newSession.date || newSession.scheduledDate || newSession.timestamp || Date.now());
+  const dayOfWeek = sessionDate.getDay(); // 0=Sun
+  const weekStart = new Date(sessionDate);
+  weekStart.setDate(weekStart.getDate() - dayOfWeek);
+  weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  weekEnd.setHours(23, 59, 59, 999);
+
+  const thisWeekCount = (timetable || []).filter(s => {
+    if (s.id && newSession.id && s.id === newSession.id) return false;
+    if (newSession.lecturerId && s.lecturerId !== newSession.lecturerId) return false;
+    if (newSession.subjectId && s.subjectId !== newSession.subjectId) return false;
+    if (newSession.batchId && s.batchId !== newSession.batchId) return false;
+    if (s.isExtra) return false;
+    const sDate = new Date(s.date || s.scheduledDate || 0);
+    return sDate >= weekStart && sDate <= weekEnd;
+  }).length;
+
+  return thisWeekCount >= limit;
+};
+
 export const DEFAULT_SETTINGS = {
   instituteName: "PBA",
   instituteSubtitle: "Full-Time Portal",
@@ -285,7 +320,19 @@ export const GeneralAdminView = ({ isMobile }) => {
   const [sessions, setSessions] = useState(() => safeLS("pba_timetable_sessions", []));
   const pbaUsers = safeLS("pba_users", []);
 
+  // Subject Manager State
+  const [showSubjectModal, setShowSubjectModal] = useState(false);
+  const [editingSubject, setEditingSubject] = useState(null);
+  const [subjectForm, setSubjectForm] = useState({
+    name: '', code: '', description: '', curriculum: 'Cambridge', level: 'A Level'
+  });
+  const [assigningSubjectId, setAssigningSubjectId] = useState(null);
+
   // Sync state to LS
+  useEffect(() => {
+    saveLS("pba_subjects", subjects);
+  }, [subjects]);
+
   useEffect(() => {
     saveLS("pba_batches", batches);
   }, [batches]);
@@ -459,16 +506,25 @@ export const GeneralAdminView = ({ isMobile }) => {
     setEditingBatchId(b.id);
     setBatchWizardStep(1);
     const existingSubjs = b.batchSubjects || b.subjects || [];
-    const formattedSubjs = existingSubjs.map((s) => ({
-      subjectId: s.subjectId || s.id,
-      subjectName: s.subjectName || s.name || "",
-      subjectCode: s.subjectCode || s.code || "",
-      mainLecturerId: s.mainLecturerId || s.lecturerId || "",
-      lecturerId: s.lecturerId || s.mainLecturerId || "",
-      assistantId: s.assistantId || "",
-      defaultRecurrence: s.defaultRecurrence || s.recurrence || "weekly",
-      recurrence: s.recurrence || s.defaultRecurrence || "weekly"
-    }));
+    const formattedSubjs = existingSubjs.map((s) => {
+      const primId = s.primaryLecturerId || s.mainLecturerId || s.lecturerId || "";
+      const primName = s.primaryLecturerName || (allLecturers || []).find(l => l.id === primId)?.name || "";
+      const assts = s.assistants || (s.assistantId ? [{ lecturerId: s.assistantId, lecturerName: (allLecturers || []).find(l => l.id === s.assistantId)?.name || "" }] : []);
+      return {
+        subjectId: s.subjectId || s.id,
+        subjectName: s.subjectName || s.name || "",
+        subjectCode: s.subjectCode || s.code || "",
+        primaryLecturerId: primId,
+        primaryLecturerName: primName,
+        assistants: assts,
+        classesPerWeek: Number(s.classesPerWeek || 2),
+        mainLecturerId: primId,
+        lecturerId: primId,
+        assistantId: assts[0]?.lecturerId || "",
+        defaultRecurrence: s.defaultRecurrence || s.recurrence || "weekly",
+        recurrence: s.recurrence || s.defaultRecurrence || "weekly"
+      };
+    });
     setBatchForm({
       name: b.name || "",
       code: b.code || "",
@@ -491,13 +547,21 @@ export const GeneralAdminView = ({ isMobile }) => {
 
     const assignedSubjects = (batchForm.batchSubjects || []).map((bs) => {
       const subObj = (subjects || []).find((s) => s.id === bs.subjectId);
+      const primId = bs.primaryLecturerId || bs.mainLecturerId || bs.lecturerId || "";
+      const primName = bs.primaryLecturerName || (allLecturers || []).find(l => l.id === primId)?.name || "";
+      const assts = bs.assistants || (bs.assistantId ? [{ lecturerId: bs.assistantId, lecturerName: (allLecturers || []).find(l => l.id === bs.assistantId)?.name || "" }] : []);
+
       return {
         subjectId: bs.subjectId,
         subjectName: bs.subjectName || subObj?.name || bs.subjectId,
         subjectCode: bs.subjectCode || subObj?.code || "SUB",
-        lecturerId: bs.mainLecturerId || bs.lecturerId || "",
-        mainLecturerId: bs.mainLecturerId || bs.lecturerId || "",
-        assistantId: bs.assistantId || "",
+        primaryLecturerId: primId,
+        primaryLecturerName: primName,
+        assistants: assts,
+        classesPerWeek: Number(bs.classesPerWeek || 2),
+        lecturerId: primId,
+        mainLecturerId: primId,
+        assistantId: assts[0]?.lecturerId || "",
         recurrence: bs.defaultRecurrence || bs.recurrence || "weekly",
         defaultRecurrence: bs.defaultRecurrence || bs.recurrence || "weekly"
       };
@@ -550,11 +614,16 @@ export const GeneralAdminView = ({ isMobile }) => {
           subjectId: subjId,
           subjectName: subObj?.name || "",
           subjectCode: subObj?.code || "",
+          primaryLecturerId: "",
+          primaryLecturerName: "",
+          assistants: [],
+          classesPerWeek: 2,
           mainLecturerId: "",
           lecturerId: "",
           assistantId: "",
           defaultRecurrence: "weekly",
-          recurrence: "weekly"
+          recurrence: "weekly",
+          createdAt: new Date().toISOString()
         }
       ];
     }
@@ -764,6 +833,26 @@ export const GeneralAdminView = ({ isMobile }) => {
         </button>
 
         <button
+          onClick={() => setActiveTab("subjects")}
+          style={{
+            padding: "8px 18px",
+            borderRadius: "7px",
+            fontSize: "13px",
+            fontWeight: activeTab === "subjects" ? 600 : 500,
+            color: activeTab === "subjects" ? theme.accent : theme.textSecondary,
+            border: "none",
+            background: activeTab === "subjects" ? "#FFFFFF" : "transparent",
+            cursor: "pointer",
+            boxShadow: activeTab === "subjects" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px"
+          }}
+        >
+          <BookOpen size={16} /> Subject Manager
+        </button>
+
+        <button
           onClick={() => setActiveTab("allocation")}
           style={{
             padding: "8px 18px",
@@ -884,6 +973,158 @@ export const GeneralAdminView = ({ isMobile }) => {
           <Settings size={16} /> Portal Settings
         </button>
       </div>
+
+      {/* ========================================================================= */}
+      {/* TAB: SUBJECT MANAGER                                                      */}
+      {/* ========================================================================= */}
+      {activeTab === "subjects" && (
+        <div>
+          {/* Header row */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <div>
+              <h3 style={{ fontFamily: t.fontHeading, fontSize: "18px", fontWeight: 700, color: theme.textPrimary, margin: 0 }}>
+                Subject Manager
+              </h3>
+              <p style={{ fontSize: "12px", color: theme.textMuted, margin: "2px 0 0" }}>
+                Create subjects and assign them to batches with lecturer allocations.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setEditingSubject(null);
+                setSubjectForm({ name: '', code: '', description: '', curriculum: 'Cambridge', level: 'A Level' });
+                setShowSubjectModal(true);
+              }}
+              style={{
+                padding: '8px 16px', borderRadius: '8px',
+                background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
+                color: 'white', border: 'none',
+                fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '6px'
+              }}>
+              <Plus size={15} /> Create Subject
+            </button>
+          </div>
+
+          {/* Subject cards grid */}
+          {(subjects || []).length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9CA3AF', background: '#FFFFFF', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>📚</div>
+              <div style={{ fontSize: '16px', fontWeight: 700, marginBottom: '6px' }}>
+                No subjects yet
+              </div>
+              <div style={{ fontSize: '13px' }}>
+                Create subjects here, then assign them to batches.
+              </div>
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+              gap: '16px'
+            }}>
+              {(subjects || []).map(sub => (
+                <div key={sub.id} style={{
+                  background: 'white', borderRadius: '12px',
+                  border: '1px solid #E2E8F0', padding: '16px',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.05)'
+                }}>
+                  {/* Code badge + name */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <div>
+                      {sub.code && (
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: '6px',
+                          background: '#EEF2FF', color: '#4F46E5',
+                          fontSize: '11px', fontWeight: 800,
+                          letterSpacing: '0.05em', marginBottom: '6px'
+                        }}>
+                          {sub.code}
+                        </span>
+                      )}
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: '#1A202C' }}>
+                        {sub.name}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        onClick={() => {
+                          setEditingSubject(sub);
+                          setSubjectForm({
+                            name: sub.name || '', code: sub.code || '',
+                            description: sub.description || '',
+                            curriculum: sub.curriculum || 'Cambridge',
+                            level: sub.level || 'A Level'
+                          });
+                          setShowSubjectModal(true);
+                        }}
+                        style={{ background: '#F1F5F9', border: 'none', borderRadius: '6px',
+                          width: '28px', height: '28px', cursor: 'pointer', fontSize: '13px',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        title="Edit Subject">
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (!window.confirm(`Delete subject "${sub.name}"?`)) return;
+                          const updated = (subjects || []).filter(s => s.id !== sub.id);
+                          saveLS('pba_subjects', updated);
+                          setSubjects(updated);
+                        }}
+                        style={{ background: '#FEF2F2', border: 'none', borderRadius: '6px',
+                          width: '28px', height: '28px', cursor: 'pointer', fontSize: '13px',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        title="Delete Subject">
+                        🗑
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Curriculum + level chips */}
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                    {sub.curriculum && (
+                      <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '11px',
+                        fontWeight: 600, background: '#F0F9FF', color: '#0369A1' }}>
+                        {sub.curriculum}
+                      </span>
+                    )}
+                    {sub.level && (
+                      <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '11px',
+                        fontWeight: 600, background: '#F5F3FF', color: '#6D28D9' }}>
+                        {sub.level}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Description */}
+                  {sub.description && (
+                    <p style={{ fontSize: '12px', color: '#6B7280', margin: 0 }}>
+                      {sub.description}
+                    </p>
+                  )}
+
+                  {/* How many batches use this subject */}
+                  {(() => {
+                    const batchList = safeLS('pba_batches', []);
+                    const count = (batchList || []).filter(b =>
+                      (b.subjects || b.batchSubjects || []).some(bs => bs.subjectId === sub.id)
+                    ).length;
+                    return count > 0 ? (
+                      <p style={{ fontSize: '11px', color: '#059669', marginTop: '8px', fontWeight: 600 }}>
+                        ✓ Assigned to {count} batch{count !== 1 ? 'es' : ''}
+                      </p>
+                    ) : (
+                      <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '8px' }}>
+                        Not assigned to any batch yet
+                      </p>
+                    );
+                  })()}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* TAB 1: BATCH MANAGER                                                      */}
@@ -1254,159 +1495,294 @@ export const GeneralAdminView = ({ isMobile }) => {
 
                   {/* STEP 2: ASSIGN SUBJECTS */}
                   {batchWizardStep === 2 && (
-                    <div style={{ display: "flex", gap: "16px" }}>
-                      <div style={{ width: "240px", borderRight: "1px solid #F0F2F5", paddingRight: "12px" }}>
+                    <div style={{ marginTop: '10px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          Assign Subjects & Lecturer Allocation
+                        </h4>
                         <input
                           type="text"
                           placeholder="Search subjects..."
                           value={subjSearch}
                           onChange={(e) => setSubjSearch(e.target.value)}
-                          style={{ width: "100%", padding: "6px 8px", border: "1px solid #E3E6EA", borderRadius: "6px", fontSize: "12px", marginBottom: "8px" }}
+                          style={{ padding: '6px 12px', border: '1px solid #E3E6EA', borderRadius: '8px', fontSize: '12px', width: '200px' }}
                         />
-                        <div style={{ maxHeight: "260px", overflowY: "auto" }}>
-                          {(subjects || [])
-                            .filter((s) => (s.name || "").toLowerCase().includes(subjSearch.toLowerCase()) || (s.code || "").toLowerCase().includes(subjSearch.toLowerCase()))
-                            .map((s) => {
-                              const isChecked = (batchForm.batchSubjects || []).some((bs) => bs.subjectId === s.id);
-                              return (
+                      </div>
+
+                      {(subjects || []).length === 0 && (
+                        <div style={{ padding: '16px', background: '#FEF3C7', borderRadius: '8px', border: '1px solid #FDE68A', marginBottom: '12px' }}>
+                          <p style={{ fontSize: '12px', color: '#D97706', fontWeight: 600, margin: 0 }}>
+                            ⚠ No subjects found. Create subjects first in Subject Manager tab.
+                          </p>
+                        </div>
+                      )}
+
+                      <div style={{ maxHeight: '380px', overflowY: 'auto', paddingRight: '4px' }}>
+                        {(subjects || [])
+                          .filter((sub) =>
+                            (sub.name || "").toLowerCase().includes(subjSearch.toLowerCase()) ||
+                            (sub.code || "").toLowerCase().includes(subjSearch.toLowerCase())
+                          )
+                          .map((sub) => {
+                            const assigned = (batchForm.batchSubjects || []).find(bs => bs.subjectId === sub.id);
+                            const isAssigned = !!assigned;
+                            const isExpanded = assigningSubjectId === sub.id;
+
+                            return (
+                              <div
+                                key={sub.id}
+                                style={{
+                                  border: `1px solid ${isAssigned ? '#C7D2FE' : '#E2E8F0'}`,
+                                  borderRadius: '10px',
+                                  marginBottom: '8px',
+                                  background: isAssigned ? '#EEF2FF' : '#FAFAFA',
+                                  overflow: 'hidden'
+                                }}
+                              >
+                                {/* Row header: checkbox + subject info + expand */}
                                 <div
-                                  key={s.id}
-                                  onClick={() => toggleBatchSubject(s.id)}
-                                  style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 0", cursor: "pointer" }}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '12px',
+                                    padding: '12px 14px',
+                                    cursor: 'pointer'
+                                  }}
+                                  onClick={() => {
+                                    if (!isAssigned) {
+                                      const newEntry = {
+                                        subjectId: sub.id,
+                                        subjectName: sub.name,
+                                        subjectCode: sub.code || '',
+                                        primaryLecturerId: '',
+                                        primaryLecturerName: '',
+                                        assistants: [],
+                                        classesPerWeek: 2,
+                                        mainLecturerId: '',
+                                        lecturerId: '',
+                                        assistantId: '',
+                                        defaultRecurrence: 'weekly',
+                                        recurrence: 'weekly',
+                                        createdAt: new Date().toISOString()
+                                      };
+                                      const updatedBS = [...(batchForm.batchSubjects || []), newEntry];
+                                      setBatchForm((prev) => ({ ...prev, batchSubjects: updatedBS, subjects: updatedBS }));
+                                      setAssigningSubjectId(sub.id);
+                                    } else {
+                                      setAssigningSubjectId(isExpanded ? null : sub.id);
+                                    }
+                                  }}
                                 >
                                   <input
                                     type="checkbox"
-                                    checked={isChecked}
-                                    onChange={(e) => {
-                                      e.stopPropagation();
-                                      toggleBatchSubject(s.id);
-                                    }}
-                                    style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                                    checked={isAssigned}
+                                    onChange={() => {}}
+                                    style={{ width: '16px', height: '16px', accentColor: '#4F46E5', cursor: 'pointer', flexShrink: 0 }}
                                   />
-                                  <span style={{ fontSize: "12px", fontWeight: 700, color: s.color || "#4F46E5", background: s.color ? s.color + "20" : "#EEF2FF", padding: "2px 6px", borderRadius: "4px" }}>
-                                    {s.code || "SUB"}
-                                  </span>
-                                  <span style={{ fontSize: "13px", color: "#1A202C" }}>{s.name}</span>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <span style={{ fontWeight: 700, fontSize: '14px', color: '#1A202C' }}>
+                                      {sub.code ? `${sub.code} — ` : ''}{sub.name}
+                                    </span>
+                                    {isAssigned && (assigned?.primaryLecturerName || assigned?.classesPerWeek) && (
+                                      <span style={{ fontSize: '11px', color: '#4F46E5', marginLeft: '8px', fontWeight: 600 }}>
+                                        · {assigned.primaryLecturerName || 'No Lecturer set'}
+                                        {assigned.classesPerWeek ? ` · ${assigned.classesPerWeek}×/wk` : ''}
+                                        {(assigned.assistants || []).length > 0 ? ` · ${assigned.assistants.length} asst.` : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {isAssigned && (
+                                    <span style={{ fontSize: '12px', color: '#6B7280' }}>
+                                      {isExpanded ? '▲' : '▼'}
+                                    </span>
+                                  )}
+                                  {isAssigned && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!window.confirm(`Remove ${sub.name} from this batch?`)) return;
+                                        const updatedBS = (batchForm.batchSubjects || []).filter(bs => bs.subjectId !== sub.id);
+                                        setBatchForm((prev) => ({ ...prev, batchSubjects: updatedBS, subjects: updatedBS }));
+                                        if (assigningSubjectId === sub.id) setAssigningSubjectId(null);
+                                      }}
+                                      style={{
+                                        background: '#FEF2F2',
+                                        border: '1px solid #FCA5A5',
+                                        borderRadius: '6px',
+                                        color: '#DC2626',
+                                        fontSize: '11px',
+                                        fontWeight: 700,
+                                        padding: '3px 8px',
+                                        cursor: 'pointer',
+                                        flexShrink: 0
+                                      }}
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
                                 </div>
-                              );
-                            })}
-                        </div>
+
+                                {/* Expanded details */}
+                                {isAssigned && isExpanded && (
+                                  <div style={{ borderTop: '1px solid #C7D2FE', padding: '14px', background: 'white' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                      {/* Primary Lecturer */}
+                                      <div>
+                                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>
+                                          Primary Lecturer
+                                        </label>
+                                        <select
+                                          value={assigned.primaryLecturerId || assigned.mainLecturerId || assigned.lecturerId || ''}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            const lect = (allLecturers || []).find(l => l.id === val);
+                                            const updatedBS = (batchForm.batchSubjects || []).map(bs =>
+                                              bs.subjectId === sub.id
+                                                ? {
+                                                    ...bs,
+                                                    primaryLecturerId: val,
+                                                    primaryLecturerName: lect?.name || '',
+                                                    mainLecturerId: val,
+                                                    lecturerId: val
+                                                  }
+                                                : bs
+                                            );
+                                            setBatchForm(prev => ({ ...prev, batchSubjects: updatedBS, subjects: updatedBS }));
+                                          }}
+                                          style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '13px', background: 'white' }}
+                                        >
+                                          <option value="">— Select Lecturer —</option>
+                                          {(allLecturers || []).map((l) => (
+                                            <option key={l.id} value={l.id}>{l.name}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+
+                                      {/* Classes per Week */}
+                                      <div>
+                                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>
+                                          Classes per Week
+                                        </label>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                          <input
+                                            type="number"
+                                            min={1}
+                                            max={7}
+                                            value={assigned.classesPerWeek || 2}
+                                            onChange={(e) => {
+                                              const val = Number(e.target.value);
+                                              const updatedBS = (batchForm.batchSubjects || []).map(bs =>
+                                                bs.subjectId === sub.id
+                                                  ? { ...bs, classesPerWeek: val }
+                                                  : bs
+                                              );
+                                              setBatchForm(prev => ({ ...prev, batchSubjects: updatedBS, subjects: updatedBS }));
+                                            }}
+                                            style={{ width: '70px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', fontWeight: 700, textAlign: 'center' }}
+                                          />
+                                          <span style={{ fontSize: '12px', color: '#6B7280' }}>
+                                            per week<br />
+                                            <span style={{ fontSize: '10px', color: '#D97706' }}>
+                                              Extra classes flagged above this
+                                            </span>
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Assistants section */}
+                                    <div style={{ marginTop: '14px' }}>
+                                      <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
+                                        Assistant Lecturers
+                                        <span style={{ fontSize: '10px', fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: '6px', color: '#9CA3AF' }}>
+                                          (optional — can cover sessions for this subject)
+                                        </span>
+                                      </label>
+
+                                      {(assigned.assistants || []).map((asst, aIdx) => (
+                                        <div key={aIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                                          <select
+                                            value={asst.lecturerId || ''}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              const lect = (allLecturers || []).find(l => l.id === val);
+                                              const updatedBS = (batchForm.batchSubjects || []).map(bs => {
+                                                if (bs.subjectId !== sub.id) return bs;
+                                                const newAssistants = [...(bs.assistants || [])];
+                                                newAssistants[aIdx] = {
+                                                  lecturerId: val,
+                                                  lecturerName: lect?.name || ''
+                                                };
+                                                return { ...bs, assistants: newAssistants, assistantId: newAssistants[0]?.lecturerId || '' };
+                                              });
+                                              setBatchForm(prev => ({ ...prev, batchSubjects: updatedBS, subjects: updatedBS }));
+                                            }}
+                                            style={{ flex: 1, padding: '8px 10px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '13px', background: 'white' }}
+                                          >
+                                            <option value="">— Select Assistant —</option>
+                                            {(allLecturers || [])
+                                              .filter(l => l.id !== (assigned.primaryLecturerId || assigned.mainLecturerId || assigned.lecturerId))
+                                              .map(l => (
+                                                <option key={l.id} value={l.id}>{l.name}</option>
+                                              ))}
+                                          </select>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updatedBS = (batchForm.batchSubjects || []).map(bs => {
+                                                if (bs.subjectId !== sub.id) return bs;
+                                                const newAssistants = (bs.assistants || []).filter((_, i) => i !== aIdx);
+                                                return { ...bs, assistants: newAssistants, assistantId: newAssistants[0]?.lecturerId || '' };
+                                              });
+                                              setBatchForm(prev => ({ ...prev, batchSubjects: updatedBS, subjects: updatedBS }));
+                                            }}
+                                            style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: '6px', color: '#DC2626', width: '28px', height: '28px', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                          >
+                                            ×
+                                          </button>
+                                        </div>
+                                      ))}
+
+                                      {(assigned.assistants || []).length < 5 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const updatedBS = (batchForm.batchSubjects || []).map(bs =>
+                                              bs.subjectId === sub.id
+                                                ? { ...bs, assistants: [...(bs.assistants || []), { lecturerId: '', lecturerName: '' }] }
+                                                : bs
+                                            );
+                                            setBatchForm(prev => ({ ...prev, batchSubjects: updatedBS, subjects: updatedBS }));
+                                          }}
+                                          style={{ padding: '6px 12px', borderRadius: '8px', border: '1px dashed #4F46E5', background: '#EEF2FF', color: '#4F46E5', fontSize: '12px', fontWeight: 700, cursor: 'pointer', marginTop: '4px' }}
+                                        >
+                                          + Add Assistant
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                       </div>
 
-                      <div style={{ flex: 1 }}>
-                        <h4 style={{ margin: "0 0 10px", fontSize: "13px", fontWeight: 700 }}>Assigned Subjects ({(batchForm.batchSubjects || []).length})</h4>
-                        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
-                          <table style={{ minWidth: "600px", width: "100%", fontSize: "11px", borderCollapse: "collapse" }}>
-                            <thead>
-                              <tr style={{ background: "#F8FAFC" }}>
-                                <th style={{ padding: "6px", textAlign: "left" }}>SUBJECT</th>
-                                <th style={{ padding: "6px", textAlign: "left" }}>LECTURER</th>
-                                <th style={{ padding: "6px", textAlign: "left" }}>ASSISTANT</th>
-                                <th style={{ padding: "6px", textAlign: "left" }}>RECURRENCE</th>
-                                <th style={{ padding: "6px", textAlign: "center" }}>✕</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(batchForm.batchSubjects || []).map((bs) => {
-                                const subObj = (subjects || []).find((s) => s.id === bs.subjectId);
-                                const subName = bs.subjectName || subObj?.name || bs.subjectId;
-                                const subCode = bs.subjectCode || subObj?.code || "SUB";
-
-                                const qualifiedLecturers = (allLecturers || []).filter(l =>
-                                  !l.subjects || l.subjects.length === 0 || l.subjects.includes(bs.subjectId) || l.subjects.includes(subName)
-                                );
-                                const lecturerList = qualifiedLecturers.length > 0 ? qualifiedLecturers : (allLecturers || []);
-
-                                return (
-                                  <tr key={bs.subjectId} style={{ borderBottom: "1px solid #F0F2F5" }}>
-                                    <td style={{ padding: "6px" }}>
-                                      <span style={{ fontSize: "10px", fontWeight: 700, color: subObj?.color || "#4F46E5", background: subObj?.color ? subObj.color + "20" : "#EEF2FF", padding: "2px 6px", borderRadius: "4px", marginRight: "6px" }}>{subCode}</span>
-                                      <strong style={{ fontSize: "12px" }}>{subName}</strong>
-                                    </td>
-                                    <td style={{ padding: "6px" }}>
-                                      <select
-                                        value={bs.mainLecturerId || bs.lecturerId || ""}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          const updatedBS = (batchForm.batchSubjects || []).map((s) =>
-                                            s.subjectId === bs.subjectId ? { ...s, mainLecturerId: val, lecturerId: val } : s
-                                          );
-                                          setBatchForm({ ...batchForm, batchSubjects: updatedBS, subjects: updatedBS });
-                                        }}
-                                        style={{ width: "100%", fontSize: "11px", padding: "4px 8px", borderRadius: "6px", border: "1px solid #E3E6EA" }}
-                                      >
-                                        <option value="">— Select Lecturer —</option>
-                                        {lecturerList.map((l) => (
-                                          <option key={l.id} value={l.id}>{l.name}</option>
-                                        ))}
-                                      </select>
-                                    </td>
-                                    <td style={{ padding: "6px" }}>
-                                      <select
-                                        value={bs.assistantId || ""}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          const updatedBS = (batchForm.batchSubjects || []).map((s) =>
-                                            s.subjectId === bs.subjectId ? { ...s, assistantId: val } : s
-                                          );
-                                          setBatchForm({ ...batchForm, batchSubjects: updatedBS, subjects: updatedBS });
-                                        }}
-                                        style={{ width: "100%", fontSize: "11px", padding: "4px 8px", borderRadius: "6px", border: "1px solid #E3E6EA" }}
-                                      >
-                                        <option value="">— None —</option>
-                                        {(allLecturers || []).map((l) => (
-                                          <option key={l.id} value={l.id}>{l.name}</option>
-                                        ))}
-                                      </select>
-                                    </td>
-                                    <td style={{ padding: "6px" }}>
-                                      <select
-                                        value={bs.defaultRecurrence || bs.recurrence || "weekly"}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          const updatedBS = (batchForm.batchSubjects || []).map((s) =>
-                                            s.subjectId === bs.subjectId ? { ...s, defaultRecurrence: val, recurrence: val } : s
-                                          );
-                                          setBatchForm({ ...batchForm, batchSubjects: updatedBS, subjects: updatedBS });
-                                        }}
-                                        style={{ width: "100%", fontSize: "11px", padding: "4px 8px", borderRadius: "6px", border: "1px solid #E3E6EA" }}
-                                      >
-                                        <option value="weekly">Weekly</option>
-                                        <option value="fortnightly">Fortnightly</option>
-                                        <option value="custom">Custom</option>
-                                      </select>
-                                    </td>
-                                    <td style={{ padding: "6px", textAlign: "center" }}>
-                                      <button
-                                        onClick={() => toggleBatchSubject(bs.subjectId)}
-                                        style={{ background: "none", border: "none", color: "#E53E3E", cursor: "pointer", fontSize: "16px" }}
-                                      >
-                                        ✕
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "16px" }}>
-                          <button
-                            type="button"
-                            onClick={() => setBatchWizardStep(1)}
-                            style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", padding: "6px 14px", borderRadius: "6px", fontSize: "12px" }}
-                          >
-                            ← Back
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setBatchWizardStep(3)}
-                            style={{ background: "#2B6CB0", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: "6px", fontSize: "12px", fontWeight: 700 }}
-                          >
-                            Next: Scheduling Rules →
-                          </button>
-                        </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "16px" }}>
+                        <button
+                          type="button"
+                          onClick={() => setBatchWizardStep(1)}
+                          style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", padding: "6px 14px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}
+                        >
+                          ← Back
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBatchWizardStep(3)}
+                          style={{ background: "#2B6CB0", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+                        >
+                          Next: Scheduling Rules →
+                        </button>
                       </div>
                     </div>
                   )}
@@ -1493,6 +1869,127 @@ export const GeneralAdminView = ({ isMobile }) => {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CREATE / EDIT SUBJECT MODAL */}
+          {showSubjectModal && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+              <div style={{ background: 'white', borderRadius: '16px', width: '100%', maxWidth: '480px', padding: '28px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#1A202C', margin: '0 0 20px' }}>
+                  {editingSubject ? 'Edit Subject' : 'Create New Subject'}
+                </h2>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                  {/* Name — full width */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>Subject Name *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Biology, Mathematics, Physics"
+                      value={subjectForm.name}
+                      onChange={e => setSubjectForm(p => ({ ...p, name: e.target.value }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  {/* Code */}
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>Subject Code</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. BIO, MATH"
+                      value={subjectForm.code}
+                      onChange={e => setSubjectForm(p => ({
+                        ...p, code: e.target.value.toUpperCase()
+                      }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  {/* Level */}
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>Level</label>
+                    <select
+                      value={subjectForm.level}
+                      onChange={e => setSubjectForm(p => ({ ...p, level: e.target.value }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', background: 'white' }}>
+                      <option value="A Level">A Level</option>
+                      <option value="AS Level">AS Level</option>
+                      <option value="O Level">O Level</option>
+                      <option value="Foundation">Foundation</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  {/* Curriculum */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>Curriculum</label>
+                    <select
+                      value={subjectForm.curriculum}
+                      onChange={e => setSubjectForm(p => ({ ...p, curriculum: e.target.value }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', background: 'white' }}>
+                      <option value="Cambridge">Cambridge</option>
+                      <option value="Edexcel">Edexcel</option>
+                      <option value="National">National</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  {/* Description */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>Description (optional)</label>
+                    <input
+                      type="text"
+                      placeholder="Short description"
+                      value={subjectForm.description}
+                      onChange={e => setSubjectForm(p => ({ ...p, description: e.target.value }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Buttons */}
+                <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowSubjectModal(false)}
+                    style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: 'white', color: '#374151', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!subjectForm.name.trim()) {
+                        alert('Subject name is required.'); return;
+                      }
+                      if (editingSubject) {
+                        const updated = (subjects || []).map(s =>
+                          s.id === editingSubject.id
+                            ? { ...s, ...subjectForm, name: subjectForm.name.trim(), code: subjectForm.code.trim() }
+                            : s
+                        );
+                        saveLS('pba_subjects', updated);
+                        setSubjects(updated);
+                      } else {
+                        const newSub = {
+                          id: `sub_${Date.now()}`,
+                          ...subjectForm,
+                          name: subjectForm.name.trim(),
+                          code: subjectForm.code.trim(),
+                          createdAt: new Date().toISOString()
+                        };
+                        const updated = [...(subjects || []), newSub];
+                        saveLS('pba_subjects', updated);
+                        setSubjects(updated);
+                      }
+                      setShowSubjectModal(false);
+                    }}
+                    style={{ flex: 2, padding: '10px', borderRadius: '8px', border: 'none', background: '#4F46E5', color: 'white', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>
+                    {editingSubject ? 'Save Changes' : 'Create Subject'}
+                  </button>
                 </div>
               </div>
             </div>
