@@ -581,11 +581,9 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
               </thead>
               <tbody>
                 {data.bookRequisitions.map((req) => {
-                  // Find matching print job status if approved
                   const matchingJob = (data.printJobs || []).find(
-                    (j) => j.bookTitle === req.bookTitle && j.batch === req.batch
+                    (j) => j.requisitionId === req.id || j.requisition_id === req.id || (j.bookTitle === req.bookTitle && j.batch === req.batch)
                   );
-                  const isJobCompleted = matchingJob && (matchingJob.status === "completed" || matchingJob.status === "Completed");
 
                   return (
                     <tr
@@ -639,7 +637,7 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                       </td>
                       {role === "Admin" && (
                         <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
-                          {req.status === "Pending" ? (
+                          {(req.status === "Pending" || req.status === "pending") ? (
                             <button
                               onClick={() => approveBookRequisition(req.id)}
                               style={{
@@ -653,10 +651,16 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                                 cursor: 'pointer'
                               }}
                             >
-                              Approve & Print
+                              ✓ Approve &amp; Print
                             </button>
-                          ) : isJobCompleted ? (
+                          ) : !matchingJob ? (
+                            <span style={{ color: '#718096', fontSize: '11px', fontWeight: 600 }}>● In Queue</span>
+                          ) : (matchingJob.status === "completed" || matchingJob.status === "Completed") ? (
                             <span style={{ color: '#276749', fontSize: '11px', fontWeight: 600 }}>✓ Completed</span>
+                          ) : (matchingJob.status === "ready" || matchingJob.status === "Ready") ? (
+                            <span style={{ color: '#6B46C1', fontSize: '11px', fontWeight: 600 }}>📦 Ready to Distribute</span>
+                          ) : (matchingJob.status === "in_progress" || matchingJob.status === "In Progress") ? (
+                            <span style={{ color: '#2B6CB0', fontSize: '11px', fontWeight: 600 }}>🖨 Printing...</span>
                           ) : (
                             <span style={{ color: '#718096', fontSize: '11px', fontWeight: 600 }}>● In Queue</span>
                           )}

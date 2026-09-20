@@ -1,11 +1,30 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useApp } from "../../context/AppContext";
 import { Share2, MessageSquare, Send, CheckCircle2 } from "lucide-react";
 import { ParentSummaryView } from "../students/ParentSummaryView";
 
-import { T, theme, type as t } from "../../theme";
+import { theme, type as t } from "../../theme";
 
-export const ParentPortalView = () => {
+const safeLS = (key, fallback = []) => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const saveLS = (key, val) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(val));
+  } catch (err) {
+    console.error("saveLS error:", err);
+  }
+};
+
+export const ParentPortalView = ({ isMobile }) => {
+  const isMobileState = isMobile !== undefined ? isMobile : (typeof window !== 'undefined' ? window.innerWidth < 768 : false);
   const { data } = useApp();
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [activeTab, setActiveTab] = useState("links");
@@ -15,7 +34,7 @@ export const ParentPortalView = () => {
   const [msgSubject, setMsgSubject] = useState("Term 2 Progress & Exam Notice");
   const [msgBody, setMsgBody] = useState("Dear Parent, Mid-term evaluation report cards for Batch 2024-A have been published.");
   const [msgChannel, setMsgChannel] = useState("WhatsApp");
-  const [logs, setLogs] = useState([
+  const [logs, setLogs] = useState(() => safeLS("pba_parent_broadcast_logs", [
     {
       id: 1,
       date: "2026-09-18",
@@ -24,7 +43,11 @@ export const ParentPortalView = () => {
       channel: "WhatsApp",
       body: "Please note Accounting class for tomorrow starts at 08:30 AM."
     }
-  ]);
+  ]));
+
+  useEffect(() => {
+    saveLS("pba_parent_broadcast_logs", logs);
+  }, [logs]);
 
   const handleSendBulk = (e) => {
     e.preventDefault();
@@ -36,13 +59,18 @@ export const ParentPortalView = () => {
       channel: msgChannel,
       body: msgBody
     };
-    setLogs([newLog, ...logs]);
+    const updated = [newLog, ...(logs || [])];
+    setLogs(updated);
+    saveLS("pba_parent_broadcast_logs", updated);
 
     if (msgChannel === "WhatsApp") {
       const text = encodeURIComponent(`*PLATINUM BUSINESS ACADEMY NOTICE*\n\nSubject: ${msgSubject}\n\n${msgBody}`);
       window.open(`https://wa.me/?text=${text}`, "_blank");
     }
   };
+
+  const studentsList = data?.students || [];
+  const batchesList = data?.batches || [];
 
   return (
     <div>
@@ -69,7 +97,8 @@ export const ParentPortalView = () => {
           padding: "4px",
           borderRadius: "10px",
           width: "fit-content",
-          marginBottom: "20px"
+          marginBottom: "20px",
+          flexWrap: isMobileState ? "wrap" : "nowrap"
         }}
       >
         <button
@@ -139,7 +168,7 @@ export const ParentPortalView = () => {
             </p>
           </div>
 
-          <div style={{ padding: isMobile ? "12px" : "16px 22px 22px 22px", overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+          <div style={{ padding: isMobileState ? "12px" : "16px 22px 22px 22px", overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
             <table style={{ minWidth: "600px", width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#F8F9FA" }}>
@@ -151,7 +180,7 @@ export const ParentPortalView = () => {
                 </tr>
               </thead>
               <tbody>
-                {data.students.map((st) => (
+                {studentsList.map((st) => (
                   <tr
                     key={st.id}
                     style={{ transition: "background 0.15s" }}
@@ -200,7 +229,7 @@ export const ParentPortalView = () => {
 
       {/* TAB 2: BULK COMMUNICATION */}
       {activeTab === "bulk" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobileState ? "1fr" : "1fr 1fr", gap: "20px" }}>
           <div
             style={{
               background: theme.cardBg,
@@ -226,7 +255,7 @@ export const ParentPortalView = () => {
                   onChange={(e) => setMsgTarget(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '9px 36px 9px 13px',
+                    padding: '9px 13px',
                     background: '#FFFFFF',
                     border: '1.5px solid #E3E6EA',
                     borderRadius: '8px',
@@ -234,19 +263,11 @@ export const ParentPortalView = () => {
                     color: '#1A202C',
                     outline: 'none',
                     fontFamily: "'Inter', 'Segoe UI', sans-serif",
-                    appearance: 'none',
-                    WebkitAppearance: 'none',
-                    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")",
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 12px center',
                     cursor: 'pointer',
-                    transition: 'border-color 0.15s, box-shadow 0.15s',
                     boxSizing: 'border-box'
                   }}
-                  onFocus={e => { e.target.style.borderColor = '#2B6CB0'; e.target.style.boxShadow = '0 0 0 3px rgba(43,108,176,0.12)'; }}
-                  onBlur={e => { e.target.style.borderColor = '#E3E6EA'; e.target.style.boxShadow = 'none'; }}
                 >
-                  {data.batches.map((b) => (
+                  {batchesList.map((b) => (
                     <option key={b.id} value={b.name}>
                       All Parents in {b.name}
                     </option>
@@ -264,7 +285,7 @@ export const ParentPortalView = () => {
                   onChange={(e) => setMsgChannel(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '9px 36px 9px 13px',
+                    padding: '9px 13px',
                     background: '#FFFFFF',
                     border: '1.5px solid #E3E6EA',
                     borderRadius: '8px',
@@ -272,17 +293,9 @@ export const ParentPortalView = () => {
                     color: '#1A202C',
                     outline: 'none',
                     fontFamily: "'Inter', 'Segoe UI', sans-serif",
-                    appearance: 'none',
-                    WebkitAppearance: 'none',
-                    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")",
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 12px center',
                     cursor: 'pointer',
-                    transition: 'border-color 0.15s, box-shadow 0.15s',
                     boxSizing: 'border-box'
                   }}
-                  onFocus={e => { e.target.style.borderColor = '#2B6CB0'; e.target.style.boxShadow = '0 0 0 3px rgba(43,108,176,0.12)'; }}
-                  onBlur={e => { e.target.style.borderColor = '#E3E6EA'; e.target.style.boxShadow = 'none'; }}
                 >
                   <option value="WhatsApp">WhatsApp (wa.me Share Link)</option>
                   <option value="Email">Email Notification</option>
@@ -309,11 +322,8 @@ export const ParentPortalView = () => {
                     color: '#1A202C',
                     outline: 'none',
                     fontFamily: "'Inter', 'Segoe UI', sans-serif",
-                    transition: 'border-color 0.15s, box-shadow 0.15s',
                     boxSizing: 'border-box'
                   }}
-                  onFocus={e => { e.target.style.borderColor = '#2B6CB0'; e.target.style.boxShadow = '0 0 0 3px rgba(43,108,176,0.12)'; }}
-                  onBlur={e => { e.target.style.borderColor = '#E3E6EA'; e.target.style.boxShadow = 'none'; }}
                 />
               </div>
 
@@ -339,11 +349,8 @@ export const ParentPortalView = () => {
                     resize: 'vertical',
                     minHeight: '120px',
                     lineHeight: '1.6',
-                    transition: 'border-color 0.15s, box-shadow 0.15s',
                     boxSizing: 'border-box'
                   }}
-                  onFocus={e => { e.target.style.borderColor = '#2B6CB0'; e.target.style.boxShadow = '0 0 0 3px rgba(43,108,176,0.12)'; }}
-                  onBlur={e => { e.target.style.borderColor = '#E3E6EA'; e.target.style.boxShadow = 'none'; }}
                 />
               </div>
 
@@ -364,7 +371,6 @@ export const ParentPortalView = () => {
                   justifyContent: 'center',
                   gap: '8px',
                   boxShadow: '0 2px 10px rgba(43,108,176,0.30)',
-                  transition: 'all 0.15s',
                   marginTop: '8px',
                   fontFamily: "'Inter', sans-serif"
                 }}
@@ -390,7 +396,7 @@ export const ParentPortalView = () => {
             </div>
 
             <div style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: "10px" }}>
-              {logs.map((l) => (
+              {(logs || []).map((l) => (
                 <div key={l.id} style={{ padding: "14px", border: "1px solid " + theme.cardBorder, borderRadius: "10px", background: "#F8FAFC" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
                     <strong style={{ fontSize: "13px", color: theme.textPrimary }}>{l.subject}</strong>
