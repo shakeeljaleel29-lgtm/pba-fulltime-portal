@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useApp } from "../../context/AppContext";
 import { DigitalAttendance } from "./DigitalAttendance";
 import { StudentProfileDrawer } from "./StudentProfileDrawer";
@@ -24,10 +24,36 @@ import { downloadStudentCsvTemplate, parseImportFile } from "../../utils/csvImpo
 
 import { T, theme, type as t } from "../../theme";
 
+const safeLS = (key, fallback = []) => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed !== null && parsed !== undefined ? parsed : fallback;
+  } catch (e) {
+    return fallback;
+  }
+};
+
+const saveLS = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.error(`Error saving ${key}:`, e);
+  }
+};
+
 export const StudentManagementView = ({ isMobile }) => {
   const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
   const { data, setData, addStudent, currentUser, exportToCSV, effectiveBranch } = useApp();
   const [activeTab, setActiveTab] = useState("database");
+
+  // Batches state — LAZY INITIALIZER from pba_batches
+  const [batches, setBatches] = useState(() => safeLS('pba_batches', []));
+
+  useEffect(() => {
+    setBatches(safeLS('pba_batches', []));
+  }, []);
 
   // Filters
   const [filterBatch, setFilterBatch] = useState("All");
@@ -46,11 +72,14 @@ export const StudentManagementView = ({ isMobile }) => {
   const [importRows, setImportRows] = useState([]);
   const [importLog, setImportLog] = useState({ successCount: 0, errorCount: 0, errors: [] });
   const [isParsing, setIsParsing] = useState(false);
+  const [importForm, setImportForm] = useState({ batchId: "", batchName: "" });
 
   const [studentForm, setStudentForm] = useState({
     name: "",
     dob: "",
-    batch: data.batches[0]?.name || "",
+    batchId: "",
+    batchName: "",
+    batch: "",
     subjects: "Business Studies, Accounting, Economics",
     phone: "",
     parentPhone: "",
@@ -60,39 +89,107 @@ export const StudentManagementView = ({ isMobile }) => {
 
   const role = currentUser.role;
 
-  const filteredStudents = data.students.filter((st) => {
-    const matchesBatch = filterBatch === "All" || st.batch === filterBatch;
-    const matchesStatus = filterStatus === "All" || st.status === filterStatus;
-    const matchesQuery =
-      st.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      st.regNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      st.phone.includes(searchQuery);
-    return matchesBatch && matchesStatus && matchesQuery;
-  });
+  const resolveBatchName = (student) => {
+    if (!student) return '—';
+    if (student.batchName) return student.batchName;
+    if (student.batch) return student.batch;
+    if (student.batchId) {
+      const b = (batches || []).find((x) => x.id === student.batchId);
+      return b?.name || student.batchId;
+    }
+    return '—';
+  };
 
-  const handleAddStudent = (e) => {
-    e.preventDefault();
-    if (!studentForm.name || !studentForm.batch) return;
-    addStudent({
-      ...studentForm,
-      subjects: typeof studentForm.subjects === "string" ? studentForm.subjects.split(",").map((s) => s.trim()) : studentForm.subjects
-    });
+  const resolveBatchFromCSV = (csvBatchValue, currentBatches = batches, fallbackForm = importForm) => {
+    if (csvBatchValue) {
+      const cleanVal = csvBatchValue.toString().toLowerCase().trim();
+      const match = (currentBatches || []).find((b) =>
+        (b.name || "").toLowerCase().trim() === cleanVal ||
+        (b.id || "").toLowerCase().trim() === cleanVal ||
+        (b.code || "").toLowerCase().trim() === cleanVal
+      );
+      if (match) return { batchId: match.id, batchName: match.name };
+    }
+    const fallbackMatch = (currentBatches || []).find((b) => b.id === fallbackForm.batchId || b.name === fallbackForm.batchName);
+    if (fallbackMatch) return { batchId: fallbackMatch.id, batchName: fallbackMatch.name };
+    const defaultB = (currentBatches || [])[0];
+    return {
+      batchId: fallbackForm.batchId || defaultB?.id || "",
+      batchName: csvBatchValue || fallbackForm.batchName || defaultB?.name || ""
+    };
+  };
+
+  const openRegisterModal = () => {
+    const currentBatches = safeLS('pba_batches', []);
+    setBatches(currentBatches);
+    const defaultBatch = currentBatches[0];
     setStudentForm({
       name: "",
       dob: "",
-      batch: data.batches[0]?.name || "",
+      batchId: defaultBatch?.id || "",
+      batchName: defaultBatch?.name || "",
+      batch: defaultBatch?.name || "",
       subjects: "Business Studies, Accounting, Economics",
       phone: "",
       parentPhone: "",
       email: "",
       address: ""
     });
+    setShowAddStudentModal(true);
+  };
+
+  const openImportModal = () => {
+    const currentBatches = safeLS('pba_batches', []);
+    setBatches(currentBatches);
+    setImportStep(1);
+    setImportRows([]);
+    setImportForm({ batchId: "", batchName: "" });
+    setShowImportModal(true);
+  };
+
+  const filteredStudents = (data.students || []).filter((st) => {
+    const stBatchName = resolveBatchName(st);
+    const matchesBatch =
+      filterBatch === "All" ||
+      st.batch === filterBatch ||
+      st.batchName === filterBatch ||
+      st.batchId === filterBatch ||
+      stBatchName === filterBatch;
+    const matchesStatus = filterStatus === "All" || st.status === filterStatus;
+    const matchesQuery =
+      (st.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (st.regNo || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (st.phone || "").includes(searchQuery);
+    return matchesBatch && matchesStatus && matchesQuery;
+  });
+
+  const handleAddStudent = (e) => {
+    e.preventDefault();
+    if (!studentForm.name) return;
+
+    const currentBatches = safeLS('pba_batches', []);
+    const selectedBatch = (currentBatches.length > 0 ? currentBatches : (batches || [])).find(
+      (b) => b.id === studentForm.batchId || b.name === studentForm.batchName || b.name === studentForm.batch
+    );
+
+    const finalBatchId = studentForm.batchId || selectedBatch?.id || "";
+    const finalBatchName = selectedBatch?.name || studentForm.batchName || studentForm.batch || "";
+
+    addStudent({
+      ...studentForm,
+      id: `student_${Date.now()}`,
+      batchId: finalBatchId,
+      batchName: finalBatchName,
+      batch: finalBatchName,
+      subjects: typeof studentForm.subjects === "string" ? studentForm.subjects.split(",").map((s) => s.trim()) : studentForm.subjects
+    });
+
     setShowAddStudentModal(false);
   };
 
   const handleExportCSV = () => {
     const headers = ["Reg No", "Full Name", "Batch", "Status", "Mobile Phone", "Parent Phone", "Email", "Enrolment Date"];
-    const rows = filteredStudents.map((s) => [s.regNo, s.name, s.batch, s.status, s.phone, s.parentPhone, s.email, s.enrolmentDate]);
+    const rows = filteredStudents.map((s) => [s.regNo, s.name, resolveBatchName(s), s.status, s.phone, s.parentPhone, s.email, s.enrolmentDate]);
     exportToCSV("PBA_Student_Database", headers, rows);
   };
 
@@ -101,17 +198,21 @@ export const StudentManagementView = ({ isMobile }) => {
     if (!file) return;
     setIsParsing(true);
     try {
+      const currentBatches = safeLS('pba_batches', []);
+      setBatches(currentBatches);
       const parsed = await parseImportFile(file);
       const processed = parsed.map((row, index) => {
-        const name = row["Full Name"] || row["FullName"] || row["name"] || "";
+        const name = row["Full Name"] || row["FullName"] || row["name"] || row["Name"] || "";
         const branch = row["Branch (Kohuwala/Wattala/Panadura)"] || row["Branch"] || row["branch"] || "Kohuwala";
-        const dob = row["Date of Birth (YYYY-MM-DD)"] || row["Date of Birth"] || row["dob"] || "";
+        const dob = row["Date of Birth (YYYY-MM-DD)"] || row["Date of Birth"] || row["dob"] || row["DOB"] || "";
         const gender = row["Gender (Male/Female/Other)"] || row["Gender"] || row["gender"] || "Other";
         const nic = row["NIC / Passport"] || row["NIC"] || row["nic"] || "";
-        const phone = row["Phone"] || row["phone"] || "";
-        const parentPhone = row["Parent/Guardian Phone"] || row["Parent Phone"] || row["parentPhone"] || "";
+        const phone = row["Phone"] || row["phone"] || row["Mobile"] || "";
+        const parentPhone = row["Parent/Guardian Phone"] || row["Parent Phone"] || row["parentPhone"] || row["Parent Mobile"] || "";
         const email = row["Email"] || row["email"] || "";
-        const batchName = row["Batch Name"] || row["Batch"] || row["batch"] || (data.batches[0]?.name || "Batch 2024-A (A/L Commerce)");
+        const rawBatch = row["Batch Name"] || row["Batch"] || row["batch"] || row["batchName"] || "";
+
+        const csvBatch = resolveBatchFromCSV(rawBatch, currentBatches, importForm);
         const subjectsStr = row["Subjects (semicolon-separated e.g. Biology;Chemistry;Physics)"] || row["Subjects"] || row["subjects"] || "";
         const notes = row["Notes"] || row["notes"] || "";
 
@@ -138,7 +239,8 @@ export const StudentManagementView = ({ isMobile }) => {
           parentPhone,
           email,
           branch,
-          batchName,
+          batchId: csvBatch.batchId,
+          batchName: csvBatch.batchName || (currentBatches[0]?.name || "Default Batch"),
           subjectsStr,
           notes,
           status,
@@ -262,11 +364,7 @@ export const StudentManagementView = ({ isMobile }) => {
         {role === "Admin" && (
           <div style={{ display: 'flex', gap: '10px' }}>
             <button
-              onClick={() => {
-                setImportStep(1);
-                setImportRows([]);
-                setShowImportModal(true);
-              }}
+              onClick={openImportModal}
               style={{
                 padding: '9px 16px',
                 background: '#FFFFFF',
@@ -286,7 +384,7 @@ export const StudentManagementView = ({ isMobile }) => {
               <Upload size={16} /> Import Students
             </button>
             <button
-              onClick={() => setShowAddStudentModal(true)}
+              onClick={openRegisterModal}
               style={{
                 background: 'linear-gradient(135deg, #2B6CB0, #1A4A8A)',
                 color: '#FFFFFF',
@@ -491,7 +589,7 @@ export const StudentManagementView = ({ isMobile }) => {
                 onBlur={e => { e.target.style.borderColor = "#E3E6EA"; e.target.style.boxShadow = "none"; }}
               >
                 <option value="All">All Batches</option>
-                {data.batches.map((b) => (
+                {(batches || []).map((b) => (
                   <option key={b.id} value={b.name}>
                     {b.name}
                   </option>
@@ -560,7 +658,7 @@ export const StudentManagementView = ({ isMobile }) => {
                       {st.name}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
-                      {st.batch}
+                      {resolveBatchName(st)}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
                       {st.phone}
@@ -740,18 +838,44 @@ export const StudentManagementView = ({ isMobile }) => {
                 />
               </div>
               <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Batch Enrolled</label>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '6px' }}>
+                  BATCH ENROLLED
+                </label>
                 <select
-                  value={studentForm.batch}
-                  onChange={(e) => setStudentForm({ ...studentForm, batch: e.target.value })}
-                  style={{
-                    width: "100%", padding: "9px 36px 9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", appearance: "none", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", cursor: "pointer", transition: "border-color 0.15s, box-shadow 0.15s", boxSizing: "border-box"
+                  value={studentForm.batchId || ''}
+                  onChange={(e) => {
+                    const selectedBatch = (batches || []).find((b) => b.id === e.target.value);
+                    setStudentForm((prev) => ({
+                      ...prev,
+                      batchId: e.target.value,
+                      batchName: selectedBatch?.name || '',
+                      batch: selectedBatch?.name || ''
+                    }));
                   }}
-                  onFocus={e => { e.target.style.borderColor = "#2B6CB0"; e.target.style.boxShadow = "0 0 0 3px rgba(43,108,176,0.12)"; }}
-                  onBlur={e => { e.target.style.borderColor = "#E3E6EA"; e.target.style.boxShadow = "none"; }}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #E3E6EA',
+                    fontSize: '14px',
+                    background: 'white',
+                    color: '#1A202C',
+                    cursor: 'pointer'
+                  }}
                 >
-                  {data.batches.map((b) => (<option key={b.id} value={b.name}>{b.name}</option>))}
+                  <option value="">— Select Batch —</option>
+                  {(batches || []).map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
                 </select>
+
+                {(batches || []).length === 0 && (
+                  <p style={{ fontSize: '11px', color: '#D97706', marginTop: '6px', fontWeight: 600 }}>
+                    ⚠ No batches found. Create batches first in General Admin → Batch Manager.
+                  </p>
+                )}
               </div>
               <div style={{ marginBottom: "16px" }}>
                 <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Mobile Number</label>
@@ -825,6 +949,39 @@ export const StudentManagementView = ({ isMobile }) => {
                   >
                     <Download size={13} /> Download Template CSV
                   </button>
+                </div>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase', letterSpacing: '0.6px', display: 'block', marginBottom: '5px' }}>
+                    Batch to Assign (Optional fallback if CSV row has no batch)
+                  </label>
+                  <select
+                    value={importForm.batchId || ''}
+                    onChange={(e) => {
+                      const b = (batches || []).find((b) => b.id === e.target.value);
+                      setImportForm((prev) => ({
+                        ...prev,
+                        batchId: e.target.value,
+                        batchName: b?.name || ''
+                      }));
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #E3E6EA',
+                      fontSize: '14px',
+                      background: 'white',
+                      color: '#1A202C'
+                    }}
+                  >
+                    <option value="">— Assign Batch to All Imported Students —</option>
+                    {(batches || []).map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* File Upload Drop Zone */}
