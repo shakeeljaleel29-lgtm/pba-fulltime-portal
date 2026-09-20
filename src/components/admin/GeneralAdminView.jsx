@@ -324,7 +324,7 @@ export const GeneralAdminView = ({ isMobile }) => {
   const [showSubjectModal, setShowSubjectModal] = useState(false);
   const [editSubjectId, setEditSubjectId]       = useState(null); // null = Create
   const [subjectForm, setSubjectForm] = useState({
-    subjectCode: '', subjectName: '', description: ''
+    code: '', name: '', description: ''
   });
   const [showDeleteSubject, setShowDeleteSubject] = useState(false);
   const [deleteSubjectTarget, setDeleteSubjectTarget] = useState(null);
@@ -1010,7 +1010,7 @@ export const GeneralAdminView = ({ isMobile }) => {
             <button
               onClick={() => {
                 setEditSubjectId(null);
-                setSubjectForm({ subjectCode: '', subjectName: '', description: '' });
+                setSubjectForm({ code: '', name: '', description: '' });
                 setShowSubjectModal(true);
               }}
               style={{
@@ -1064,9 +1064,9 @@ export const GeneralAdminView = ({ isMobile }) => {
                       onClick={() => {
                         setEditSubjectId(subject.id);
                         setSubjectForm({
-                          subjectCode:  subject.subjectCode  || subject.code || '',
-                          subjectName:  subject.subjectName  || subject.name || '',
-                          description:  subject.description  || ''
+                          code: subject.code || subject.subjectCode || '',
+                          name: subject.name || subject.subjectName || '',
+                          description: subject.description || ''
                         });
                         setShowSubjectModal(true);
                       }}
@@ -4286,207 +4286,277 @@ export const GeneralAdminView = ({ isMobile }) => {
         </div>
       )}
 
-      {/* ── SUBJECT MANAGER MODAL (Fix 1B) ── */}
-      {showSubjectModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-          zIndex: 2000, display: 'flex', alignItems: 'center',
-          justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: '14px', width: '460px',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.25)', overflow: 'hidden' }}>
+  {showSubjectModal && (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+      zIndex: 2000, display: 'flex', alignItems: 'center',
+      justifyContent: 'center', padding: '20px'
+    }}>
+      <div style={{
+        background: 'white', borderRadius: '16px',
+        width: '100%', maxWidth: '460px',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.2)', padding: '28px'
+      }}>
 
-            {/* Header */}
-            <div style={{ background: 'linear-gradient(135deg,#1E1B4B,#4F46E5)',
-              padding: '18px 24px', display: 'flex', alignItems: 'center',
-              justifyContent: 'space-between' }}>
-              <div style={{ fontWeight: 800, fontSize: '16px', color: 'white' }}>
-                {editSubjectId ? '✏️ Edit Subject' : '+ Create Subject'}
-              </div>
-              <button onClick={() => setShowSubjectModal(false)}
-                style={{ background: 'rgba(255,255,255,0.15)', border: 'none',
-                  color: 'white', borderRadius: '6px', padding: '4px 12px',
-                  cursor: 'pointer', fontSize: '16px' }}>×</button>
-            </div>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between',
+          alignItems: 'center', marginBottom: '22px'
+        }}>
+          <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800,
+            color: '#1A202C' }}>
+            {editSubjectId ? 'Edit Subject' : 'Create Subject'}
+          </h3>
+          <button
+            onClick={() => setShowSubjectModal(false)}
+            style={{
+              background: '#F3F4F6', border: 'none', borderRadius: '8px',
+              width: '34px', height: '34px', fontSize: '20px',
+              cursor: 'pointer', color: '#6B7280'
+            }}>
+            ×
+          </button>
+        </div>
 
-            <div style={{ padding: '24px' }}>
-
-              {/* Subject Code */}
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
-                  textTransform: 'uppercase', letterSpacing: '0.05em',
-                  display: 'block', marginBottom: '6px' }}>
-                  Subject Code *
-                </label>
-                <input
-                  type="text"
-                  maxLength={6}
-                  value={subjectForm.subjectCode}
-                  onChange={e => setSubjectForm(prev => ({
-                    ...prev, subjectCode: e.target.value.toUpperCase()
-                  }))}
-                  placeholder="e.g. BIO, CHEM, MATH"
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
-                    border: '1px solid #E3E6EA', fontSize: '14px', fontWeight: 700,
-                    color: '#4F46E5', boxSizing: 'border-box', letterSpacing: '0.05em' }}
-                />
-              </div>
-
-              {/* Subject Name */}
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
-                  textTransform: 'uppercase', letterSpacing: '0.05em',
-                  display: 'block', marginBottom: '6px' }}>
-                  Subject Name *
-                </label>
-                <input
-                  type="text"
-                  value={subjectForm.subjectName}
-                  onChange={e => setSubjectForm(prev => ({
-                    ...prev, subjectName: e.target.value
-                  }))}
-                  placeholder="e.g. Biology, Chemistry, Mathematics"
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
-                    border: '1px solid #E3E6EA', fontSize: '14px',
-                    boxSizing: 'border-box' }}
-                />
-              </div>
-
-              {/* Description */}
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
-                  textTransform: 'uppercase', letterSpacing: '0.05em',
-                  display: 'block', marginBottom: '6px' }}>
-                  Description (optional)
-                </label>
-                <textarea
-                  value={subjectForm.description}
-                  onChange={e => setSubjectForm(prev => ({
-                    ...prev, description: e.target.value
-                  }))}
-                  placeholder="Brief description of this subject..."
-                  rows={3}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
-                    border: '1px solid #E3E6EA', fontSize: '13px',
-                    resize: 'vertical', boxSizing: 'border-box' }}
-                />
-              </div>
-
-              {/* Buttons */}
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                <button onClick={() => setShowSubjectModal(false)}
-                  style={{ padding: '10px 20px', borderRadius: '8px',
-                    border: '1px solid #E3E6EA', background: 'white',
-                    color: '#374151', fontSize: '13px', fontWeight: 600,
-                    cursor: 'pointer' }}>
-                  Cancel
-                </button>
-                <button
-                  disabled={!subjectForm.subjectCode.trim() || !subjectForm.subjectName.trim()}
-                  onClick={() => {
-                    const code = subjectForm.subjectCode.trim();
-                    const name = subjectForm.subjectName.trim();
-                    if (!code || !name) return;
-                    const existing = safeLS('pba_subjects', []);
-                    let updated;
-                    if (editSubjectId) {
-                      updated = (existing || []).map(s =>
-                        s.id === editSubjectId
-                          ? { ...s, subjectCode: code, code: code, subjectName: name, name: name,
-                              description: subjectForm.description.trim() }
-                          : s
-                      );
-                    } else {
-                      const newSub = {
-                        id: `sub_${Date.now()}`,
-                        subjectCode: code,
-                        code: code,
-                        subjectName: name,
-                        name: name,
-                        description: subjectForm.description.trim(),
-                        createdAt: new Date().toISOString()
-                      };
-                      updated = [...(existing || []), newSub];
-                    }
-                    saveLS('pba_subjects', updated);
-                    setSubjects(updated);
-                    setShowSubjectModal(false);
-                  }}
-                  style={{
-                    padding: '10px 24px', borderRadius: '8px', border: 'none',
-                    background: (subjectForm.subjectCode.trim() && subjectForm.subjectName.trim())
-                      ? '#4F46E5' : '#E5E7EB',
-                    color: (subjectForm.subjectCode.trim() && subjectForm.subjectName.trim())
-                      ? 'white' : '#9CA3AF',
-                    fontSize: '13px', fontWeight: 700,
-                    cursor: (subjectForm.subjectCode.trim() && subjectForm.subjectName.trim())
-                      ? 'pointer' : 'not-allowed'
-                  }}>
-                  {editSubjectId ? 'Save Changes' : 'Create Subject'}
-                </button>
-              </div>
-
-            </div>
+        {/* Subject Code */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{
+            fontSize: '12px', fontWeight: 700, color: '#374151',
+            textTransform: 'uppercase', letterSpacing: '0.05em',
+            display: 'block', marginBottom: '6px'
+          }}>
+            Subject Code *
+          </label>
+          <input
+            type="text"
+            value={subjectForm.code}
+            onChange={e => setSubjectForm(prev => ({
+              ...prev, code: e.target.value.toUpperCase().slice(0, 6)
+            }))}
+            placeholder="e.g. BIO"
+            maxLength={6}
+            style={{
+              width: '100%', padding: '10px 12px', borderRadius: '8px',
+              border: '1px solid #E3E6EA', fontSize: '14px',
+              fontWeight: 700, letterSpacing: '0.08em', boxSizing: 'border-box'
+            }}
+          />
+          <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>
+            Short code shown on cards and timetable (max 6 chars)
           </div>
         </div>
-      )}
 
-      {/* ── SUBJECT DELETE CONFIRMATION MODAL (Fix 1C) ── */}
-      {showDeleteSubject && deleteSubjectTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-          zIndex: 2100, display: 'flex', alignItems: 'center',
-          justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: '14px', width: '400px',
-            padding: '28px 24px', boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
-            textAlign: 'center' }}>
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🗑️</div>
-            <div style={{ fontWeight: 800, fontSize: '17px', color: '#1A202C',
-              marginBottom: '8px' }}>
-              Delete {deleteSubjectTarget.subjectName || deleteSubjectTarget.name}?
-            </div>
-            {(() => {
-              const count = getSubjectBatchCount(deleteSubjectTarget.id);
-              return count > 0 ? (
-                <div style={{ padding: '10px 14px', background: '#FEF3C7',
-                  border: '1px solid #F59E0B', borderRadius: '8px',
-                  fontSize: '12px', color: '#92400E', fontWeight: 600,
-                  marginBottom: '16px' }}>
-                  ⚠ This subject is assigned to {count} batch{count > 1 ? 'es' : ''}.
-                  Deleting it will not remove batch assignments automatically.
-                  Remove it from batches first in Batch Manager → Edit Batch → Assign Subjects.
-                </div>
-              ) : (
-                <div style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px' }}>
-                  This cannot be undone. The subject will be removed from the subject list.
-                </div>
+        {/* Subject Name */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{
+            fontSize: '12px', fontWeight: 700, color: '#374151',
+            textTransform: 'uppercase', letterSpacing: '0.05em',
+            display: 'block', marginBottom: '6px'
+          }}>
+            Subject Name *
+          </label>
+          <input
+            type="text"
+            value={subjectForm.name}
+            onChange={e => setSubjectForm(prev => ({
+              ...prev, name: e.target.value
+            }))}
+            placeholder="e.g. Biology"
+            style={{
+              width: '100%', padding: '10px 12px', borderRadius: '8px',
+              border: '1px solid #E3E6EA', fontSize: '14px',
+              boxSizing: 'border-box'
+            }}
+          />
+        </div>
+
+        {/* Description */}
+        <div style={{ marginBottom: '24px' }}>
+          <label style={{
+            fontSize: '12px', fontWeight: 700, color: '#374151',
+            textTransform: 'uppercase', letterSpacing: '0.05em',
+            display: 'block', marginBottom: '6px'
+          }}>
+            Description <span style={{ fontWeight: 400, color: '#9CA3AF' }}>
+              (optional)
+            </span>
+          </label>
+          <textarea
+            value={subjectForm.description}
+            onChange={e => setSubjectForm(prev => ({
+              ...prev, description: e.target.value
+            }))}
+            placeholder="Brief description of the subject..."
+            rows={2}
+            style={{
+              width: '100%', padding: '10px 12px', borderRadius: '8px',
+              border: '1px solid #E3E6EA', fontSize: '13px',
+              resize: 'vertical', boxSizing: 'border-box'
+            }}
+          />
+        </div>
+
+        {/* Validation */}
+        {(!subjectForm.code.trim() || !subjectForm.name.trim()) && (
+          <p style={{
+            fontSize: '12px', color: '#D97706', marginBottom: '12px',
+            fontWeight: 600
+          }}>
+            ⚠ Subject Code and Name are required.
+          </p>
+        )}
+
+        {/* Footer buttons */}
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+          <button
+            onClick={() => setShowSubjectModal(false)}
+            style={{
+              padding: '10px 20px', borderRadius: '8px',
+              border: '1px solid #E3E6EA', background: 'white',
+              fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+              color: '#374151'
+            }}>
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              if (!subjectForm.code.trim() || !subjectForm.name.trim()) return;
+
+              const existing = safeLS('pba_subjects', []);
+              let updated;
+
+              if (editSubjectId) {
+                // EDIT: update the matching record
+                updated = (existing || []).map(s =>
+                  s.id === editSubjectId
+                    ? {
+                        ...s,
+                        code: subjectForm.code.trim(),
+                        subjectCode: subjectForm.code.trim(),
+                        name: subjectForm.name.trim(),
+                        subjectName: subjectForm.name.trim(),
+                        description: subjectForm.description.trim()
+                      }
+                    : s
+                );
+              } else {
+                // CREATE: push new record
+                const newSubject = {
+                  id: `sub_${Date.now()}`,
+                  code: subjectForm.code.trim(),
+                  subjectCode: subjectForm.code.trim(),
+                  name: subjectForm.name.trim(),
+                  subjectName: subjectForm.name.trim(),
+                  description: subjectForm.description.trim(),
+                  createdAt: new Date().toISOString()
+                };
+                updated = [...(existing || []), newSubject];
+              }
+
+              saveLS('pba_subjects', updated);
+              setSubjects(updated);
+              setShowSubjectModal(false);
+              setEditSubjectId(null);
+            }}
+            disabled={!subjectForm.code.trim() || !subjectForm.name.trim()}
+            style={{
+              padding: '10px 24px', borderRadius: '8px',
+              background: (!subjectForm.code.trim() || !subjectForm.name.trim())
+                ? '#C7D2FE'
+                : 'linear-gradient(135deg, #4F46E5, #7C3AED)',
+              border: 'none', color: 'white',
+              fontSize: '13px', fontWeight: 700,
+              cursor: (!subjectForm.code.trim() || !subjectForm.name.trim())
+                ? 'not-allowed' : 'pointer'
+            }}>
+            {editSubjectId ? 'Save Changes' : 'Create Subject'}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  )}
+
+  {showDeleteSubject && deleteSubjectTarget && (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+      zIndex: 2001, display: 'flex', alignItems: 'center',
+      justifyContent: 'center', padding: '20px'
+    }}>
+      <div style={{
+        background: 'white', borderRadius: '16px',
+        width: '100%', maxWidth: '400px',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.2)', padding: '28px'
+      }}>
+        <h3 style={{ margin: '0 0 12px', fontSize: '17px', fontWeight: 800,
+          color: '#1A202C' }}>
+          Delete Subject?
+        </h3>
+        <p style={{ fontSize: '14px', color: '#374151', margin: '0 0 8px' }}>
+          You are about to delete{' '}
+          <strong>
+            {deleteSubjectTarget.name || deleteSubjectTarget.subjectName}
+          </strong>{' '}
+          ({deleteSubjectTarget.code || deleteSubjectTarget.subjectCode}).
+        </p>
+
+        {/* Warn if assigned to batches */}
+        {getSubjectBatchCount(deleteSubjectTarget.id) > 0 && (
+          <div style={{
+            background: '#FFF7ED', border: '1px solid #FED7AA',
+            borderRadius: '8px', padding: '10px 12px',
+            fontSize: '12px', color: '#92400E', fontWeight: 600,
+            marginBottom: '16px'
+          }}>
+            ⚠ This subject is assigned to{' '}
+            {getSubjectBatchCount(deleteSubjectTarget.id)} batch
+            {getSubjectBatchCount(deleteSubjectTarget.id) > 1 ? 'es' : ''}.
+            Deleting it will remove it from the subject list but will NOT
+            automatically remove it from those batches.
+          </div>
+        )}
+
+        <p style={{
+          fontSize: '12px', color: '#6B7280', margin: '0 0 20px'
+        }}>
+          This action cannot be undone.
+        </p>
+
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+          <button
+            onClick={() => {
+              setShowDeleteSubject(false);
+              setDeleteSubjectTarget(null);
+            }}
+            style={{
+              padding: '10px 20px', borderRadius: '8px',
+              border: '1px solid #E3E6EA', background: 'white',
+              fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+              color: '#374151'
+            }}>
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              const existing = safeLS('pba_subjects', []);
+              const updated = (existing || []).filter(
+                s => s.id !== deleteSubjectTarget.id
               );
-            })()}
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-              <button onClick={() => { setShowDeleteSubject(false); setDeleteSubjectTarget(null); }}
-                style={{ padding: '10px 24px', borderRadius: '8px',
-                  border: '1px solid #E3E6EA', background: 'white',
-                  color: '#374151', fontSize: '13px', fontWeight: 600,
-                  cursor: 'pointer' }}>
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  const existing = safeLS('pba_subjects', []);
-                  const updated = (existing || []).filter(
-                    s => s.id !== deleteSubjectTarget.id
-                  );
-                  saveLS('pba_subjects', updated);
-                  setSubjects(updated);
-                  setShowDeleteSubject(false);
-                  setDeleteSubjectTarget(null);
-                }}
-                style={{ padding: '10px 24px', borderRadius: '8px', border: 'none',
-                  background: '#DC2626', color: 'white',
-                  fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
-                Delete
-              </button>
-            </div>
-          </div>
+              saveLS('pba_subjects', updated);
+              setSubjects(updated);
+              setShowDeleteSubject(false);
+              setDeleteSubjectTarget(null);
+            }}
+            style={{
+              padding: '10px 22px', borderRadius: '8px',
+              background: '#DC2626', border: 'none', color: 'white',
+              fontSize: '13px', fontWeight: 700, cursor: 'pointer'
+            }}>
+            Delete Subject
+          </button>
         </div>
-      )}
+      </div>
+    </div>
+  )}
 
       {/* ── CLASSROOM MANAGER MODAL (Fix 2) ── */}
       {showClassroomModal && (
