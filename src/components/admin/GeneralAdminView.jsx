@@ -487,8 +487,22 @@ export const GeneralAdminView = ({ isMobile }) => {
   };
 
   // Daily Allocations Sheet State
+  const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+  const [allocDay, setAllocDay] = useState(todayDayName);
   const [allocationDate, setAllocationDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [selectedClassroomForSchedule, setSelectedClassroomForSchedule] = useState("All");
+
+  const allocSessions = (() => {
+    const timetable = safeLS('pba_timetable', []);
+    return (timetable || [])
+      .filter(s => s.day === allocDay)
+      .sort((a, b) => {
+        // Sort by startTime ascending
+        const ta = (a.startTime || '00:00').replace(':', '');
+        const tb = (b.startTime || '00:00').replace(':', '');
+        return Number(ta) - Number(tb);
+      });
+  })();
 
   const role = currentUser.role;
   const allLecturers = Array.from(
@@ -2123,119 +2137,138 @@ export const GeneralAdminView = ({ isMobile }) => {
           </div>
 
           {/* Daily Allocation Sheet */}
-          {(() => {
-            const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-            const todayAllocations = (timetable || [])
-              .filter(s => s.day === todayDayName)
-              .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
-
-            return (
-              <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: "12px", padding: "18px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-                  <div style={{ fontWeight: 700, fontSize: '15px', color: '#1A202C' }}>
-                    Daily Allocation Sheet ({todayDayName})
-                  </div>
-                  <button
-                    onClick={() => {
-                      if ((todayAllocations || []).length === 0) {
-                        alert('No sessions scheduled for today to share.');
-                        return;
-                      }
-                      const lines = [
-                        `*📋 Daily Allocation Sheet — ${todayDayName}*`,
-                        `_PBA Full-Time Portal_`,
-                        '',
-                        ...(todayAllocations || []).map(s =>
-                          `🕐 *${s.startTime || '—'}${s.endTime ? '–'+s.endTime : ''}*` +
-                          `\n📍 ${s.classroomName || 'No room'}` +
-                          `\n📚 ${s.subjectName || '—'} (${s.batchName || '—'})` +
-                          `\n👤 ${s.lecturerName || '—'}` +
-                          (s.assistantName || (s.assistants && s.assistants.length > 0)
-                            ? `\n🤝 ${(s.assistants||[]).map(a=>a.lecturerName).filter(Boolean).join(', ') || s.assistantName}`
-                            : '')
-                        )
-                      ];
-                      const text = lines.join('\n');
-                      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-                    }}
-                    style={{
-                      background: "#25D366",
-                      color: "#FFF",
-                      border: "none",
-                      borderRadius: "6px",
-                      padding: "6px 12px",
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      cursor: "pointer"
-                    }}
-                  >
-                    Share via WhatsApp
-                  </button>
-                </div>
-                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
-                  <table style={{ minWidth: "600px", width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ background: "#F8FAFC", borderBottom: "2px solid #E3E6EA" }}>
-                        <th style={{ padding: "10px 16px", textAlign: "left" }}>TIME</th>
-                        <th style={{ padding: "10px 16px", textAlign: "left" }}>CLASSROOM</th>
-                        <th style={{ padding: "10px 16px", textAlign: "left" }}>BATCH</th>
-                        <th style={{ padding: "10px 16px", textAlign: "left" }}>SUBJECT</th>
-                        <th style={{ padding: "10px 16px", textAlign: "left" }}>LECTURER</th>
-                        <th style={{ padding: "10px 16px", textAlign: "left" }}>ASSISTANT</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(todayAllocations || []).length === 0 ? (
-                        <tr>
-                          <td colSpan={6} style={{ padding: '32px', textAlign: 'center', color: '#9CA3AF', fontSize: '13px' }}>
-                            No sessions scheduled for {todayDayName}.
-                            Sessions appear here once scheduled in the Visual Timetable Builder.
-                          </td>
-                        </tr>
-                      ) : (
-                        (todayAllocations || []).map((session, idx) => (
-                          <tr key={session.id || idx}
-                            style={{ borderBottom: '1px solid #F1F5F9', background: idx % 2 === 0 ? 'white' : '#FAFAFA' }}>
-                            <td style={{ padding: '10px 16px', fontSize: '13px', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
-                              {session.startTime || '—'}
-                              {session.endTime ? `–${session.endTime}` : ''}
-                            </td>
-                            <td style={{ padding: '10px 16px', fontSize: '13px', color: '#1A202C' }}>
-                              {session.classroomName
-                                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4F46E5', flexShrink: 0 }} />
-                                    {session.classroomName}
-                                  </span>
-                                : <span style={{ color: '#D1D5DB' }}>— Not set —</span>}
-                            </td>
-                            <td style={{ padding: '10px 16px', fontSize: '13px', color: '#374151' }}>
-                              {session.batchName || '—'}
-                            </td>
-                            <td style={{ padding: '10px 16px', fontSize: '13px', color: '#374151' }}>
-                              {session.subjectCode
-                                ? <span>
-                                    <span style={{ fontWeight: 700, color: '#4F46E5', marginRight: '6px' }}>{session.subjectCode}</span>
-                                    {session.subjectName || ''}
-                                  </span>
-                                : (session.subjectName || '—')}
-                            </td>
-                            <td style={{ padding: '10px 16px', fontSize: '13px', color: '#374151' }}>
-                              {session.lecturerName || '—'}
-                            </td>
-                            <td style={{ padding: '10px 16px', fontSize: '13px', color: '#6B7280' }}>
-                              {(session.assistants && (session.assistants || []).length > 0)
-                                ? (session.assistants || []).map(a => a.lecturerName).filter(Boolean).join(', ')
-                                : (session.assistantName || '—')}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+          <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', padding: '18px' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '16px',
+              marginBottom: '16px', flexWrap: 'wrap'
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800,
+                  color: '#1A202C' }}>
+                  Daily Allocation Sheet
+                </h3>
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#6B7280' }}>
+                  Classroom usage schedule for the selected day
+                </p>
               </div>
-            );
-          })()}
+
+              {/* Day picker */}
+              <select
+                value={allocDay}
+                onChange={e => setAllocDay(e.target.value)}
+                style={{
+                  padding: '8px 14px', borderRadius: '8px',
+                  border: '1px solid #E3E6EA', fontSize: '13px',
+                  fontWeight: 700, background: 'white', color: '#1A202C',
+                  cursor: 'pointer'
+                }}>
+                {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+                  .map(d => (
+                    <option key={d} value={d}>
+                      {d}{d === todayDayName ? ' (Today)' : ''}
+                    </option>
+                  ))}
+              </select>
+
+              {/* WhatsApp share button */}
+              <button
+                onClick={() => {
+                  const rows = allocSessions.map(s =>
+                    `${s.startTime || ''}–${s.endTime || ''} | ${s.classroomName || '— Not set —'} | ${s.batchName || ''} | ${s.subjectName || ''} | ${s.lecturerName || ''}`
+                  ).join('\n');
+                  const text = `📋 Daily Allocation Sheet — ${allocDay}\n\n` +
+                    (rows || 'No sessions scheduled.') +
+                    `\n\nPBA Full-Time Portal`;
+                  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                }}
+                style={{
+                  padding: '8px 16px', borderRadius: '8px',
+                  background: '#25D366', border: 'none', color: 'white',
+                  fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                  marginLeft: 'auto'
+                }}>
+                📤 Share via WhatsApp
+              </button>
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{
+                width: '100%', borderCollapse: 'collapse',
+                fontSize: '13px'
+              }}>
+                <thead>
+                  <tr style={{ background: '#F8FAFC', borderBottom: '2px solid #E3E6EA' }}>
+                    {['TIME', 'CLASSROOM', 'BATCH', 'SUBJECT', 'LECTURER'].map(col => (
+                      <th key={col} style={{
+                        padding: '10px 14px', textAlign: 'left',
+                        fontSize: '11px', fontWeight: 700, color: '#6B7280',
+                        textTransform: 'uppercase', letterSpacing: '0.05em'
+                      }}>
+                        {col}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {allocSessions.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{
+                        padding: '40px', textAlign: 'center',
+                        color: '#9CA3AF', fontSize: '13px'
+                      }}>
+                        <div style={{ fontSize: '28px', marginBottom: '8px' }}>📋</div>
+                        <div style={{ fontWeight: 600, marginBottom: '4px' }}>
+                          No sessions scheduled for {allocDay}
+                        </div>
+                        <div style={{ fontSize: '12px' }}>
+                          Sessions are added via the Visual Timetable Builder.
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    allocSessions.map((s, i) => (
+                      <tr key={s.id || i} style={{
+                        borderBottom: '1px solid #F3F4F6',
+                        background: i % 2 === 0 ? 'white' : '#FAFAFA'
+                      }}>
+                        <td style={{ padding: '10px 14px', fontWeight: 600,
+                          color: '#1A202C', whiteSpace: 'nowrap' }}>
+                          {s.startTime || '—'}{s.endTime ? `–${s.endTime}` : ''}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: '#374151' }}>
+                          {s.classroomName || (
+                            <span style={{ color: '#D97706', fontSize: '11px',
+                              fontStyle: 'italic' }}>
+                              — Not set
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: '#374151' }}>
+                          {s.batchName || '—'}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: '#374151' }}>
+                          {s.subjectName || (
+                            <span style={{ color: '#9CA3AF', fontStyle: 'italic' }}>
+                              — No subject
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: '#374151' }}>
+                          {s.lecturerName || '—'}
+                          {(s.assistants || []).length > 0 && (
+                            <div style={{ fontSize: '11px', color: '#6B7280',
+                              marginTop: '2px' }}>
+                              + {(s.assistants || []).map(a => a.lecturerName).join(', ')}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
