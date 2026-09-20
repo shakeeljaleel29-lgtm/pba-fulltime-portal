@@ -2,15 +2,16 @@ import React from "react";
 import { useApp } from "../../context/AppContext";
 import { UserCheck, AlertTriangle, X } from "lucide-react";
 
-export const ReplacementModal = () => {
+export const ReplacementModal = ({ isMobile }) => {
   const { replacementModal, setReplacementModal, assignCoverLecturer } = useApp();
   const { isOpen, leaveRequest, matchingLecturers } = replacementModal;
+  const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
 
   if (!isOpen || !leaveRequest) return null;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "520px", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+      <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "20px" : "28px", width: isMobileState ? "95vw" : "520px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative", margin: isMobileState ? "20px auto" : "auto" }}>
         <button
           onClick={() => setReplacementModal({ isOpen: false })}
           style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}

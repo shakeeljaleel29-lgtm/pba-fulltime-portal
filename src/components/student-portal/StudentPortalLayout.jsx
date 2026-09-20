@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import { T } from "../../theme";
 
-export const StudentPortalLayout = () => {
+export const StudentPortalLayout = ({ isMobile }) => {
+  const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
   const { currentUser, data, logout } = useApp();
   const [activeSubTab, setActiveSubTab] = useState("my-dashboard");
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -49,10 +50,12 @@ export const StudentPortalLayout = () => {
       <header
         style={{
           background: T.sidebarBg,
-          padding: '12px 28px',
+          padding: isMobileState ? '12px 16px' : '12px 28px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
           boxShadow: '0 2px 12px rgba(0,0,0,0.15)'
         }}
       >
@@ -77,44 +80,46 @@ export const StudentPortalLayout = () => {
         </div>
 
         {/* Right: student info + buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobileState ? '8px' : '16px', marginLeft: 'auto' }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#F8FAFC' }}>{linkedStudent.name}</div>
-            <div style={{ fontSize: '11px', color: '#64748B' }}>{linkedStudent.regNo} · {linkedStudent.branch}</div>
+            <div style={{ fontSize: isMobileState ? '12px' : '13px', fontWeight: 700, color: '#F8FAFC' }}>{linkedStudent.name}</div>
+            <div style={{ fontSize: '10px', color: '#64748B' }}>{linkedStudent.regNo}</div>
           </div>
 
           <button
             onClick={() => setShowPasswordModal(true)}
             style={{
-              padding: '6px 12px',
+              padding: '6px 10px',
               background: 'transparent',
               border: '1px solid rgba(255,255,255,0.15)',
               borderRadius: '8px',
               fontSize: '12px', fontWeight: 600,
               color: '#94A3B8',
               cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: '6px'
+              display: 'flex', alignItems: 'center', gap: '4px',
+              minHeight: isMobileState ? '40px' : undefined
             }}
           >
             <KeyRound size={13} />
-            Password
+            {!isMobileState && "Password"}
           </button>
 
           <button
             onClick={logout}
             style={{
-              padding: '6px 12px',
+              padding: '6px 10px',
               background: 'transparent',
               border: '1px solid rgba(255,255,255,0.15)',
               borderRadius: '8px',
               fontSize: '12px', fontWeight: 600,
               color: '#94A3B8',
               cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: '6px'
+              display: 'flex', alignItems: 'center', gap: '4px',
+              minHeight: isMobileState ? '40px' : undefined
             }}
           >
             <LogOut size={13} />
-            Sign Out
+            {!isMobileState && "Sign Out"}
           </button>
         </div>
       </header>
@@ -124,7 +129,7 @@ export const StudentPortalLayout = () => {
         style={{
           background: '#FFFFFF',
           borderBottom: '1px solid #E2E8F0',
-          padding: '0 28px',
+          padding: isMobileState ? '0 12px' : '0 28px',
           display: 'flex',
           alignItems: 'center'
         }}
@@ -133,7 +138,8 @@ export const StudentPortalLayout = () => {
           style={{
             display: 'flex',
             gap: '2px',
-            overflowX: 'auto'
+            overflowX: 'auto',
+            WebkitOverflowScrolling: 'touch'
           }}
         >
           {tabs.map((tab) => {
@@ -144,7 +150,7 @@ export const StudentPortalLayout = () => {
                 key={tab.id}
                 onClick={() => setActiveSubTab(tab.id)}
                 style={{
-                  padding: '12px 18px',
+                  padding: isMobileState ? '10px 12px' : '12px 18px',
                   background: 'transparent',
                   border: 'none',
                   borderBottom: isActive ? '2px solid #4F46E5' : '2px solid transparent',
@@ -153,7 +159,8 @@ export const StudentPortalLayout = () => {
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                   display: 'flex', alignItems: 'center', gap: '6px',
-                  transition: 'all 0.15s ease'
+                  transition: 'all 0.15s ease',
+                  minHeight: isMobileState ? '40px' : undefined
                 }}
               >
                 <Icon size={15} style={{ color: 'currentColor' }} />
@@ -165,16 +172,16 @@ export const StudentPortalLayout = () => {
       </div>
 
       {/* Main Content View */}
-      <main style={{ flex: 1, padding: "28px 32px", backgroundColor: "#F0F4FF" }}>
-        {activeSubTab === "my-dashboard" && <StudentDashboard student={linkedStudent} />}
-        {activeSubTab === "my-timetable" && <StudentTimetable student={linkedStudent} />}
-        {activeSubTab === "my-attendance" && <StudentAttendance student={linkedStudent} />}
-        {activeSubTab === "my-fees" && <StudentFees student={linkedStudent} />}
-        {activeSubTab === "my-results" && <StudentGrades student={linkedStudent} />}
-        {activeSubTab === "my-profile" && <StudentProfile student={linkedStudent} />}
+      <main style={{ flex: 1, padding: isMobileState ? '16px' : '28px 32px', backgroundColor: "#F0F4FF" }}>
+        {activeSubTab === "my-dashboard" && <StudentDashboard student={linkedStudent} isMobile={isMobileState} />}
+        {activeSubTab === "my-timetable" && <StudentTimetable student={linkedStudent} isMobile={isMobileState} />}
+        {activeSubTab === "my-attendance" && <StudentAttendance student={linkedStudent} isMobile={isMobileState} />}
+        {activeSubTab === "my-fees" && <StudentFees student={linkedStudent} isMobile={isMobileState} />}
+        {activeSubTab === "my-results" && <StudentGrades student={linkedStudent} isMobile={isMobileState} />}
+        {activeSubTab === "my-profile" && <StudentProfile student={linkedStudent} isMobile={isMobileState} />}
       </main>
 
-      <ChangePasswordModal isOpen={showPasswordModal} onClose={() => setShowPasswordModal(false)} />
+      <ChangePasswordModal isOpen={showPasswordModal} onClose={() => setShowPasswordModal(false)} isMobile={isMobileState} />
     </div>
   );
 };

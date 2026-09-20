@@ -97,7 +97,8 @@ const safeLS = (key, fallback = []) => {
   }
 };
 
-const LecturerManagementViewInner = () => {
+const LecturerManagementViewInner = ({ isMobile }) => {
+  const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
   const { data, setData, currentUser, approveLeaveRequest, rejectLeaveRequest, submitLeaveRequest, addLecturer } = useApp();
   const [activeTab, setActiveTab] = useState("profiles");
 
@@ -686,8 +687,8 @@ const LecturerManagementViewInner = () => {
             )}
           </div>
 
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+            <table style={{ minWidth: "600px", width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#F8F9FA" }}>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Lecturer Name</th>
@@ -767,8 +768,8 @@ const LecturerManagementViewInner = () => {
 
       {/* LECTURER DETAIL & TEACHING ASSIGNMENTS MODAL */}
       {selectedLecturer && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "700px", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "700px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
             <button
               onClick={() => setSelectedLecturer(null)}
               style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -875,7 +876,8 @@ const LecturerManagementViewInner = () => {
                 }
 
                 return (
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                  <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+                    <table style={{ minWidth: "600px", width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
                     <thead>
                       <tr style={{ background: "#F8F9FA" }}>
                         <th style={{ padding: "8px 12px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: theme.textMuted, textTransform: "uppercase" }}>Subject</th>
@@ -909,8 +911,9 @@ const LecturerManagementViewInner = () => {
                       ))}
                     </tbody>
                   </table>
-                );
-              })()}
+                </div>
+              );
+            })()}
 
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "24px", paddingTop: "16px", borderTop: "1px solid #F4F5F7" }}>
                 <button
@@ -972,8 +975,8 @@ const LecturerManagementViewInner = () => {
             )}
           </div>
 
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+            <table style={{ minWidth: "600px", width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#F8F9FA" }}>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Lecturer</th>
@@ -1352,8 +1355,8 @@ const LecturerManagementViewInner = () => {
 
             {/* TABLE GRID OR EMPTY STATE */}
             {filteredGridRows.length > 0 ? (
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "center" }}>
+              <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+                <table style={{ minWidth: "600px", width: "100%", borderCollapse: "collapse", textAlign: "center" }}>
                   <thead>
                     <tr style={{ background: "#F8F9FA" }}>
                       <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Lecturer Name</th>
@@ -1909,8 +1912,8 @@ const LecturerManagementViewInner = () => {
 
               {/* SESSION LOG TABLE */}
               {paginatedRows.length > 0 ? (
-                <div style={{ overflowX: 'auto', border: '1px solid #E3E6EA', borderRadius: '10px' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #E3E6EA', borderRadius: '12px' }}>
+                  <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                     <thead>
                       <tr style={{ background: '#F8FAFC', borderBottom: '1.5px solid #E3E6EA' }}>
                         <th style={{ padding: '10px 14px', fontSize: '11px', fontWeight: 700, color: '#718096' }}>DATE</th>
@@ -1985,8 +1988,8 @@ const LecturerManagementViewInner = () => {
 
       {/* Add Lecturer Modal */}
       {showAddLecModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "520px", maxHeight: '90vh', overflowY: 'auto', boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "520px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
             <button
               onClick={() => setShowAddLecModal(false)}
               style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -2356,8 +2359,8 @@ const LecturerManagementViewInner = () => {
 
       {/* Submit Leave Modal */}
       {showLeaveModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "500px", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "500px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
             <button
               onClick={() => setShowLeaveModal(false)}
               style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -2435,8 +2438,8 @@ const LecturerManagementViewInner = () => {
 
       {/* Log Topic Modal */}
       {showTopicModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "500px", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "500px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
             <button
               onClick={() => setShowTopicModal(false)}
               style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -2498,8 +2501,8 @@ const LecturerManagementViewInner = () => {
 
       {/* Bulk Import Lecturers Modal */}
       {showImportModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "800px", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "800px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
             <button
               onClick={() => setShowImportModal(false)}
               style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -2543,8 +2546,8 @@ const LecturerManagementViewInner = () => {
                         {importRows.length} records found — <span style={{ color: '#2F855A' }}>{readyCount} ready to import</span>, <span style={{ color: '#C53030' }}>{errorCount} with errors</span>
                       </div>
 
-                      <div style={{ border: '1px solid #E3E6EA', borderRadius: '8px', overflow: 'hidden', maxHeight: '250px', overflowY: 'auto', marginBottom: '20px' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <div style={{ border: '1px solid #E3E6EA', borderRadius: '12px', overflow: 'hidden', overflowX: 'auto', WebkitOverflowScrolling: 'touch', maxHeight: '250px', overflowY: 'auto', marginBottom: '20px' }}>
+                        <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                           <thead>
                             <tr style={{ background: '#F8F9FB', borderBottom: '1px solid #E3E6EA' }}>
                               <th style={{ padding: '8px 12px', textAlign: 'left', color: '#718096' }}>Row</th>

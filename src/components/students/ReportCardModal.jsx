@@ -23,22 +23,24 @@ export const ReportCardModal = ({ student, examResults = [], onClose }) => {
     window.print();
   };
 
+  const isMobileState = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+
   return (
-    <div className="modal-overlay">
-      <div className="modal-card modal-card-lg">
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(10,15,28,0.55)', backdropFilter: 'blur(4px)', zIndex: 1100, display: 'flex', alignItems: isMobileState ? 'flex-start' : 'center', justifyContent: 'center', padding: isMobileState ? '20px 12px' : '0', overflowY: 'auto' }}>
+      <div className="modal-card modal-card-lg" style={{ width: isMobileState ? '95vw' : '720px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', margin: isMobileState ? '20px auto' : 'auto' }}>
         <div className="modal-header no-print">
           <h3 style={{ fontSize: "1.05rem", fontWeight: 700 }}>Official Digital Report Card</h3>
           <div style={{ display: "flex", gap: "8px" }}>
-            <button className="btn btn-sm btn-primary" onClick={handlePrint}>
+            <button className="btn btn-sm btn-primary" onClick={handlePrint} style={{ minHeight: isMobileState ? '40px' : undefined }}>
               <Printer size={14} /> Print / Download PDF
             </button>
-            <button style={{ background: "none", border: "none", cursor: "pointer" }} onClick={onClose}>
+            <button style={{ background: "none", border: "none", cursor: "pointer", minHeight: isMobileState ? '40px' : undefined }} onClick={onClose}>
               <X size={20} />
             </button>
           </div>
         </div>
 
-        <div className="modal-body" style={{ padding: "32px", backgroundColor: "#FFFFFF" }}>
+        <div className="modal-body" style={{ padding: isMobileState ? '16px' : '32px', backgroundColor: "#FFFFFF" }}>
           {/* PBA Institutional Header */}
           <div
             style={{
@@ -51,7 +53,7 @@ export const ReportCardModal = ({ student, examResults = [], onClose }) => {
             <div
               style={{
                 fontFamily: "Sora, sans-serif",
-                fontSize: "1.6rem",
+                fontSize: isMobileState ? "1.2rem" : "1.6rem",
                 fontWeight: 800,
                 color: "#1A3566",
                 letterSpacing: "0.5px"

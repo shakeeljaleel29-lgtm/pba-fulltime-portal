@@ -231,7 +231,8 @@ const DEFAULT_BATCHES = [
 
 const COLOR_PALETTE = ["#2B6CB0", "#276749", "#B7860A", "#6B46C1", "#C53030", "#2C7A7B"];
 
-export const GeneralAdminView = () => {
+export const GeneralAdminView = ({ isMobile }) => {
+  const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
   const { data, addAnnouncement, currentUser, filterByBranch } = useApp();
   const [activeTab, setActiveTab] = useState("batches");
 
@@ -1018,8 +1019,8 @@ export const GeneralAdminView = () => {
 
           {/* 3-STEP WIZARD MODAL */}
           {showBatchModal && (
-            <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "100%", maxWidth: "640px", maxHeight: "82vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+            <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+              <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "640px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
                 {/* MODAL HEADER */}
                 <div style={{ padding: "18px 24px", borderBottom: "1px solid #E3E6EA", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>
@@ -1201,8 +1202,8 @@ export const GeneralAdminView = () => {
 
                       <div style={{ flex: 1 }}>
                         <h4 style={{ margin: "0 0 10px", fontSize: "13px", fontWeight: 700 }}>Assigned Subjects ({(batchForm.batchSubjects || []).length})</h4>
-                        <div style={{ maxHeight: "260px", overflowY: "auto" }}>
-                          <table style={{ width: "100%", fontSize: "11px", borderCollapse: "collapse" }}>
+                        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+                          <table style={{ minWidth: "600px", width: "100%", fontSize: "11px", borderCollapse: "collapse" }}>
                             <thead>
                               <tr style={{ background: "#F8FAFC" }}>
                                 <th style={{ padding: "6px", textAlign: "left" }}>SUBJECT</th>
@@ -1495,7 +1496,7 @@ export const GeneralAdminView = () => {
           </div>
 
           {/* CLASSROOM CARDS GRID */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "24px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobileState ? "1fr" : "repeat(3, 1fr)", gap: "16px", marginBottom: "24px" }}>
             {(filteredClassrooms || []).map((cls) => {
               const isActive = cls.isActive !== false;
               const facilitiesList = cls.facilities || [];
@@ -1671,7 +1672,8 @@ export const GeneralAdminView = () => {
                 Share via WhatsApp
               </button>
             </div>
-            <table style={{ width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
+            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+              <table style={{ minWidth: "600px", width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#F8FAFC", borderBottom: "2px solid #E3E6EA" }}>
                   <th style={{ padding: "8px", textAlign: "left" }}>TIME</th>
@@ -1699,11 +1701,12 @@ export const GeneralAdminView = () => {
               </tbody>
             </table>
           </div>
+          </div>
 
           {/* ADD / EDIT CLASSROOM MODAL */}
           {showClassroomModal && (
-            <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "100%", maxWidth: "520px", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+            <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+              <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "520px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
                 <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>
                   {editingClassroom ? "Edit Classroom" : "Add Classroom"}
                 </h3>
@@ -2165,8 +2168,8 @@ export const GeneralAdminView = () => {
                 </div>
 
                 {/* TABLE */}
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
+                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+                  <table style={{ minWidth: "600px", width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ background: "#F8FAFC", borderBottom: "2px solid #E3E6EA" }}>
                         <th style={{ padding: "10px", textAlign: "left" }}>DATE</th>
@@ -2263,8 +2266,8 @@ export const GeneralAdminView = () => {
 
       {/* MODAL: ATTENDANCE MODAL (MARK / VIEW) */}
       {attModal.isOpen && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "100%", maxWidth: "600px", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "600px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
             {/* Header */}
             <div style={{ padding: "18px 24px", borderBottom: "1px solid #E3E6EA", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
@@ -2456,8 +2459,8 @@ export const GeneralAdminView = () => {
 
       {/* MODAL: SCHEDULE MAKE-UP CLASS MODAL */}
       {makeUpModal.isOpen && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "100%", maxWidth: "520px", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "520px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>Schedule Make-up Class</h3>
@@ -2637,8 +2640,8 @@ export const GeneralAdminView = () => {
 
       {/* MODAL: ENROLLED STUDENTS PANEL */}
       {enrolledPanelBatch && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "100%", maxWidth: "680px", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "680px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column" }}>
             {/* Header */}
             <div style={{ padding: "18px 24px", borderBottom: "1px solid #E3E6EA", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
@@ -2815,8 +2818,8 @@ export const GeneralAdminView = () => {
 
       {/* MODAL: ENROLL STUDENTS MODAL */}
       {showEnrollModal && enrolledPanelBatch && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "100%", maxWidth: "580px", maxHeight: "85vh", overflowY: "auto", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1100, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "580px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>
                 Enroll Students into {enrolledPanelBatch.name}

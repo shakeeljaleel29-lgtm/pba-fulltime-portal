@@ -23,8 +23,9 @@ import { printExamResultsPDF } from "../../utils/pdfGenerator";
 
 import { T, theme, type as t } from "../../theme";
 
-export const ExamManagementView = () => {
-  const { data, setData, addExam, currentUser, exportToCSV, effectiveBranch, filterByBranch, showToast } = useApp();
+export const ExamManagementView = ({ isMobile }) => {
+  const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
+  const { data, setData, addExam, updateExamMarks, currentUser, filterByBranch, effectiveBranch, showToast, exportToCSV } = useApp();
 
   // Page Tabs: 'schedule' | 'mark-entry' | 'results' | 'performance'
   const [activeTab, setActiveTab] = useState("schedule");
@@ -1084,8 +1085,8 @@ export const ExamManagementView = () => {
 
               {/* MARK ENTRY TABLE */}
               <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', overflow: 'hidden', marginBottom: '20px' }}>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                  <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: '#F8F9FA' }}>
                         <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left', width: '50px' }}>#</th>
@@ -1337,8 +1338,8 @@ export const ExamManagementView = () => {
 
               {/* RESULTS TABLE */}
               <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', overflow: 'hidden', marginBottom: '24px' }}>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                  <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: '#F8F9FA' }}>
                         <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left', width: '90px' }}>Rank</th>
@@ -1579,8 +1580,8 @@ export const ExamManagementView = () => {
               </h4>
             </div>
 
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#F8F9FA' }}>
                     <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left', minWidth: '180px' }}>Student Name</th>
@@ -1713,8 +1714,8 @@ export const ExamManagementView = () => {
 
       {/* SCHEDULE EXAM MODAL */}
       {showAddExamModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "520px", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "520px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
             <button
               onClick={() => setShowAddExamModal(false)}
               style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -1878,8 +1879,8 @@ export const ExamManagementView = () => {
 
       {/* CSV / EXCEL IMPORT PREVIEW MODAL */}
       {showImportModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "680px", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "680px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
             <button
               onClick={() => setShowImportModal(false)}
               style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -1893,8 +1894,8 @@ export const ExamManagementView = () => {
               Review parsed rows from your uploaded file before committing to mark entry sheet.
             </p>
 
-            <div style={{ maxHeight: "360px", overflowY: "auto", border: "1px solid #E3E6EA", borderRadius: "8px", marginBottom: "20px" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div style={{ maxHeight: "360px", overflowY: "auto", overflowX: "auto", WebkitOverflowScrolling: "touch", border: "1px solid #E3E6EA", borderRadius: "12px", marginBottom: "20px" }}>
+              <table style={{ minWidth: "600px", width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ background: "#F8F9FA" }}>
                     <th style={{ padding: "8px 12px", fontSize: "11px", color: "#718096", textAlign: "left" }}>Row</th>

@@ -6,8 +6,9 @@ import { getBranches, getUserRoles } from "./GeneralAdminView";
 
 import { T, theme, type as t } from "../../theme";
 
-export const UserManagementTab = () => {
-  const { data, addUser, toggleUserStatus, resetUserPassword } = useApp();
+export const UserManagementTab = ({ isMobile }) => {
+  const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
+  const { data, addUser, toggleUserStatus, resetUserPassword, setData, currentUser, showToast } = useApp();
   const [showAddModal, setShowAddModal] = useState(false);
   const [resetModalUser, setResetModalUser] = useState(null);
   const [newPassword, setNewPassword] = useState("");
@@ -114,8 +115,8 @@ export const UserManagementTab = () => {
         </button>
       </div>
 
-      <div style={{ padding: '16px 22px 22px 22px', overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div style={{ padding: isMobileState ? '12px' : '16px 22px 22px 22px', overflowX: 'auto', WebkitOverflowScrolling: 'touch', borderRadius: '12px' }}>
+        <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#F8F9FA' }}>
               <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left' }}>Username</th>
@@ -178,8 +179,8 @@ export const UserManagementTab = () => {
 
       {/* Add User Modal */}
       {showAddModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,15,28,0.55)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#FFFFFF', borderRadius: '16px', padding: '28px', width: '100%', maxWidth: '500px', boxShadow: '0 24px 64px rgba(0,0,0,0.20)', position: 'relative' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,15,28,0.55)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: isMobileState ? 'flex-start' : 'center', justifyContent: 'center', padding: isMobileState ? '20px 12px' : '0', overflowY: 'auto' }}>
+          <div style={{ background: '#FFFFFF', borderRadius: '16px', padding: isMobileState ? '16px' : '28px', width: isMobileState ? '95vw' : '500px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', margin: isMobileState ? '20px auto' : 'auto', boxShadow: '0 24px 64px rgba(0,0,0,0.20)', position: 'relative' }}>
             <button
               onClick={() => setShowAddModal(false)}
               style={{ position: 'absolute', top: '16px', right: '16px', width: '32px', height: '32px', borderRadius: '8px', background: '#F4F5F7', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#718096', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -263,8 +264,8 @@ export const UserManagementTab = () => {
 
       {/* Reset Password Modal */}
       {resetModalUser && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,15,28,0.55)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#FFFFFF', borderRadius: '16px', padding: '28px', width: '100%', maxWidth: '500px', boxShadow: '0 24px 64px rgba(0,0,0,0.20)', position: 'relative' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,15,28,0.55)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: isMobileState ? 'flex-start' : 'center', justifyContent: 'center', padding: isMobileState ? '20px 12px' : '0', overflowY: 'auto' }}>
+          <div style={{ background: '#FFFFFF', borderRadius: '16px', padding: isMobileState ? '16px' : '28px', width: isMobileState ? '95vw' : '500px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', margin: isMobileState ? '20px auto' : 'auto', boxShadow: '0 24px 64px rgba(0,0,0,0.20)', position: 'relative' }}>
             <button
               onClick={() => setResetModalUser(null)}
               style={{ position: 'absolute', top: '16px', right: '16px', width: '32px', height: '32px', borderRadius: '8px', background: '#F4F5F7', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#718096', display: 'flex', alignItems: 'center', justifyContent: 'center' }}

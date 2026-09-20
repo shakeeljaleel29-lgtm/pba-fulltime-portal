@@ -98,8 +98,8 @@ export const ParentSummaryView = ({ student, onClose }) => {
               <strong style={{ fontSize: "0.95rem" }}>Latest Term Test Evaluation</strong>
             </div>
 
-            <div className="table-container" style={{ marginBottom: "8px" }}>
-              <table className="custom-table" style={{ fontSize: "0.82rem" }}>
+            <div className="table-container" style={{ marginBottom: "8px", overflowX: 'auto', WebkitOverflowScrolling: 'touch', borderRadius: '12px' }}>
+              <table className="custom-table" style={{ minWidth: '500px', fontSize: "0.82rem" }}>
                 <thead>
                   <tr>
                     <th>Subject</th>

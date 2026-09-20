@@ -86,8 +86,8 @@ export const StudentAttendance = ({ student }) => {
         </div>
 
         {studentAttendanceRecords.length > 0 ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', borderRadius: '12px' }}>
+            <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#F8FAFC' }}>
                   <th style={{ padding: '10px 16px', fontSize: '10px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #E3E6EA', textAlign: 'left', width: '36px' }}>#</th>

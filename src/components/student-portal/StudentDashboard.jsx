@@ -2,7 +2,8 @@ import React from "react";
 import { useApp } from "../../context/AppContext";
 import { Calendar, Clock, CheckCircle2, FileText } from "lucide-react";
 
-export const StudentDashboard = ({ student }) => {
+export const StudentDashboard = ({ student, isMobile }) => {
+  const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
   const { data } = useApp();
 
   // Find next upcoming class for student's batch
@@ -111,7 +112,7 @@ export const StudentDashboard = ({ student }) => {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
+          gridTemplateColumns: isMobileState ? "1fr" : "1fr 1fr",
           gap: "16px"
         }}
       >
@@ -236,92 +237,94 @@ export const StudentDashboard = ({ student }) => {
             <span style={titleStyle}>Latest Evaluation Summary</span>
           </div>
 
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th
-                  style={{
-                    fontSize: "10px",
-                    fontWeight: 700,
-                    color: "#718096",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                    paddingBottom: "8px",
-                    textAlign: "left",
-                    borderBottom: "1px solid #E3E6EA",
-                    fontFamily: "'Inter', sans-serif"
-                  }}
-                >
-                  Subject
-                </th>
-                <th
-                  style={{
-                    fontSize: "10px",
-                    fontWeight: 700,
-                    color: "#718096",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                    paddingBottom: "8px",
-                    textAlign: "left",
-                    borderBottom: "1px solid #E3E6EA",
-                    fontFamily: "'Inter', sans-serif"
-                  }}
-                >
-                  Marks
-                </th>
-                <th
-                  style={{
-                    fontSize: "10px",
-                    fontWeight: 700,
-                    color: "#718096",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                    paddingBottom: "8px",
-                    textAlign: "left",
-                    borderBottom: "1px solid #E3E6EA",
-                    fontFamily: "'Inter', sans-serif"
-                  }}
-                >
-                  Grade
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
-                  Business Studies
-                </td>
-                <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
-                  88 / 100
-                </td>
-                <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5" }}>
-                  {getGradeBadge("A")}
-                </td>
-              </tr>
-              <tr>
-                <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
-                  Accounting
-                </td>
-                <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
-                  84 / 100
-                </td>
-                <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5" }}>
-                  {getGradeBadge("A")}
-                </td>
-              </tr>
-              <tr>
-                <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
-                  Economics
-                </td>
-                <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
-                  78 / 100
-                </td>
-                <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5" }}>
-                  {getGradeBadge("B")}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', borderRadius: '12px' }}>
+            <table style={{ minWidth: "400px", width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      color: "#718096",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                      paddingBottom: "8px",
+                      textAlign: "left",
+                      borderBottom: "1px solid #E3E6EA",
+                      fontFamily: "'Inter', sans-serif"
+                    }}
+                  >
+                    Subject
+                  </th>
+                  <th
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      color: "#718096",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                      paddingBottom: "8px",
+                      textAlign: "left",
+                      borderBottom: "1px solid #E3E6EA",
+                      fontFamily: "'Inter', sans-serif"
+                    }}
+                  >
+                    Marks
+                  </th>
+                  <th
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      color: "#718096",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                      paddingBottom: "8px",
+                      textAlign: "left",
+                      borderBottom: "1px solid #E3E6EA",
+                      fontFamily: "'Inter', sans-serif"
+                    }}
+                  >
+                    Grade
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
+                    Business Studies
+                  </td>
+                  <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
+                    88 / 100
+                  </td>
+                  <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5" }}>
+                    {getGradeBadge("A")}
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
+                    Accounting
+                  </td>
+                  <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
+                    84 / 100
+                  </td>
+                  <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5" }}>
+                    {getGradeBadge("A")}
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
+                    Economics
+                  </td>
+                  <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5", fontFamily: "'Inter', sans-serif" }}>
+                    78 / 100
+                  </td>
+                  <td style={{ fontSize: "13px", color: "#1A202C", padding: "8px 0", borderBottom: "1px solid #F0F2F5" }}>
+                    {getGradeBadge("B")}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

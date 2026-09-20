@@ -106,9 +106,11 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
     { id: "report", label: "Report Card", icon: FileSpreadsheet, onClick: () => setShowReportCardModal(true) }
   ];
 
+  const isMobileState = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+
   return (
-    <div className="modal-overlay">
-      <div className="modal-card modal-card-lg" style={{ height: "90vh" }}>
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(10,15,28,0.55)', backdropFilter: 'blur(4px)', zIndex: 1050, display: 'flex', alignItems: isMobileState ? 'flex-start' : 'center', justifyContent: 'center', padding: isMobileState ? '10px 8px' : '0', overflowY: 'auto' }}>
+      <div className="modal-card modal-card-lg" style={{ width: isMobileState ? '98vw' : '880px', maxWidth: '98vw', height: "90vh", maxHeight: '92vh', overflowY: 'auto', margin: isMobileState ? '10px auto' : 'auto' }}>
         {/* Header */}
         <div className="modal-header" style={{ backgroundColor: "#1A3566", color: "#FFFFFF" }}>
           <div>
@@ -235,7 +237,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
           </div>
           {/* OVERVIEW */}
           {activeTab === "overview" && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobileState ? "1fr" : "1fr 1fr", gap: "16px" }}>
               <div className="card" style={{ marginBottom: 0 }}>
                 <h4 style={{ fontSize: "0.95rem", marginBottom: "12px", borderBottom: "1px solid #E2E8F0", paddingBottom: "6px" }}>
                   Personal Information

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useApp } from "../../context/AppContext";
 import { T } from "../../theme";
 
-export const LoginPage = () => {
+export const LoginPage = ({ isMobile }) => {
   const { login } = useApp();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -40,40 +40,47 @@ export const LoginPage = () => {
   };
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", width: "100vw", background: "#F0F4FF" }}>
+    <div style={{
+      display: "flex",
+      flexDirection: isMobile ? "column" : "row",
+      minHeight: "100vh",
+      overflowY: isMobile ? "auto" : "hidden",
+      width: "100vw",
+      background: "#F0F4FF"
+    }}>
       {/* LEFT panel (brand) */}
       <div
         style={{
-          width: "45%",
-          minWidth: "360px",
+          width: isMobile ? "100%" : "45%",
+          minWidth: isMobile ? "auto" : "360px",
           background: "linear-gradient(180deg, #0F172A 0%, #1A2744 100%)",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          padding: "60px 48px",
-          position: "relative"
+          padding: isMobile ? "36px 24px" : "60px 48px",
+          boxSizing: "border-box"
         }}
       >
         <div style={{
-          width: '56px', height: '56px',
+          width: '48px', height: '48px',
           background: T.primaryGrad,
-          borderRadius: '16px',
+          borderRadius: '14px',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: '28px', fontWeight: 800, color: '#FFFFFF',
+          fontSize: '24px', fontWeight: 800, color: '#FFFFFF',
           boxShadow: T.primaryShadow,
-          marginBottom: '20px'
+          marginBottom: '16px'
         }}>P</div>
-        <div style={{ fontSize: "28px", fontWeight: 800, color: "#F8FAFC", letterSpacing: "-0.5px" }}>
+        <div style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: 800, color: "#F8FAFC", letterSpacing: "-0.5px", textAlign: "center" }}>
           PBA Full-Time Portal
         </div>
-        <div style={{ fontSize: "14px", color: "#94A3B8", marginTop: "8px", fontWeight: 500, textAlign: "center" }}>
+        <div style={{ fontSize: "13px", color: "#94A3B8", marginTop: "6px", fontWeight: 500, textAlign: "center" }}>
           Platinum Business Academy
         </div>
 
-        <div style={{ width: "48px", height: "3px", background: T.primaryGrad, borderRadius: "2px", margin: "24px auto" }} />
+        <div style={{ width: "40px", height: "3px", background: T.primaryGrad, borderRadius: "2px", margin: "18px auto" }} />
 
-        <div style={{ fontSize: "13px", color: "#64748B", maxWidth: "300px", textAlign: "center", lineHeight: 1.6 }}>
+        <div style={{ fontSize: "12px", color: "#64748B", maxWidth: "280px", textAlign: "center", lineHeight: 1.5 }}>
           Comprehensive management portal for students, timetables, examinations, fees, and broadcasts.
         </div>
       </div>
@@ -86,14 +93,15 @@ export const LoginPage = () => {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          padding: "60px 48px"
+          padding: isMobile ? "32px 24px" : "60px 48px",
+          boxSizing: "border-box"
         }}
       >
-        <div style={{ width: "100%", maxWidth: "400px" }}>
+        <div style={{ width: "100%", maxWidth: isMobile ? "100%" : "400px" }}>
           <h2 style={{ fontSize: "22px", fontWeight: 800, color: "#0F172A", marginBottom: "6px", letterSpacing: "-0.4px" }}>
             Sign In to PBA
           </h2>
-          <p style={{ fontSize: "13px", color: "#64748B", marginBottom: "28px" }}>
+          <p style={{ fontSize: "13px", color: "#64748B", marginBottom: "24px" }}>
             Enter your credentials to access your account.
           </p>
 
@@ -181,7 +189,8 @@ export const LoginPage = () => {
                 fontSize: '14px', fontWeight: 700,
                 cursor: 'pointer',
                 boxShadow: '0 4px 14px rgba(79,70,229,0.35)',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.15s ease',
+                minHeight: isMobile ? '44px' : undefined
               }}
             >
               {loading ? "Signing In..." : "Sign In"}
@@ -189,7 +198,7 @@ export const LoginPage = () => {
           </form>
 
           {/* Quick Demo Fill Helper */}
-          <div style={{ marginTop: "32px", paddingTop: "20px", borderTop: "1px solid #E2E8F0" }}>
+          <div style={{ marginTop: "28px", paddingTop: "18px", borderTop: "1px solid #E2E8F0" }}>
             <p style={{ fontSize: "10px", color: "#64748B", textAlign: "center", margin: "0 0 12px", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 700 }}>
               Quick Demo Login
             </p>
@@ -211,7 +220,8 @@ export const LoginPage = () => {
                     border: '1px solid #E2E8F0',
                     borderRadius: '8px',
                     fontSize: '12px', fontWeight: 600,
-                    cursor: 'pointer'
+                    cursor: 'pointer',
+                    minHeight: isMobile ? '40px' : undefined
                   }}
                 >
                   {label}

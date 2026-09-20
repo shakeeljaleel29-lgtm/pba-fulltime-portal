@@ -275,10 +275,12 @@ export const DigitalAttendance = () => {
             border: '1px solid #E3E6EA',
             borderRadius: '12px',
             overflow: 'hidden',
+            overflowX: 'auto',
+            WebkitOverflowScrolling: 'touch',
             boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
             marginBottom: '16px'
           }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#F8F9FB', borderBottom: '1px solid #E3E6EA' }}>
                   <th style={{
@@ -475,9 +477,11 @@ export const DigitalAttendance = () => {
         border: '1px solid #E3E6EA',
         borderRadius: '12px',
         overflow: 'hidden',
+        overflowX: 'auto',
+        WebkitOverflowScrolling: 'touch',
         boxShadow: '0 1px 4px rgba(0,0,0,0.05)'
       }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#F8F9FB', borderBottom: '1px solid #E3E6EA' }}>
               {['Date', 'Batch', 'Subject', 'Lecturer', 'Present', 'Late', 'Absent', 'Rate (%)'].map(col => (

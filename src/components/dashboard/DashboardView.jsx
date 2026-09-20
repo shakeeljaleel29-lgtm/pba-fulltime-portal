@@ -2,7 +2,7 @@ import React from "react";
 import { useApp } from "../../context/AppContext";
 import { T } from "../../theme";
 
-export const DashboardView = () => {
+export const DashboardView = ({ isMobile }) => {
   const {
     data,
     setActiveTab,
@@ -105,10 +105,17 @@ export const DashboardView = () => {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
       {/* Page Header Section */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+      <div style={{
+        display: "flex",
+        flexDirection: isMobile ? "column" : "row",
+        alignItems: isMobile ? "flex-start" : "center",
+        justifyContent: "space-between",
+        gap: "12px",
+        marginBottom: "4px"
+      }}>
         <div>
           <h1 style={{
-            fontSize: '22px', fontWeight: 800, color: '#0F172A',
+            fontSize: isMobile ? '18px' : '22px', fontWeight: 800, color: '#0F172A',
             margin: '0 0 4px', letterSpacing: '-0.5px'
           }}>Dashboard Overview</h1>
           <p style={{
@@ -127,7 +134,8 @@ export const DashboardView = () => {
             cursor: 'pointer',
             boxShadow: T.primaryShadow,
             display: 'inline-flex', alignItems: 'center', gap: '6px',
-            transition: 'all 0.15s ease'
+            transition: 'all 0.15s ease',
+            minHeight: isMobile ? '40px' : undefined
           }}
         >
           Compose Broadcast
@@ -160,7 +168,11 @@ export const DashboardView = () => {
       )}
 
       {/* STAT / KPI CARDS */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "16px" }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "repeat(5, 1fr)",
+        gap: "16px"
+      }}>
         {tiles.map((tile) => (
           <div
             key={tile.label}
@@ -171,7 +183,7 @@ export const DashboardView = () => {
               borderRadius: '16px',
               boxShadow: '0 2px 16px rgba(0,0,0,0.05)',
               padding: '20px 22px',
-              display: 'flex', alignItems: 'flex-start', gap: '14px',
+              display: 'flex', alignItems: 'center', gap: '14px',
               cursor: 'pointer',
               transition: 'box-shadow 0.2s ease'
             }}
@@ -205,7 +217,7 @@ export const DashboardView = () => {
         border: '1px solid rgba(226,232,240,0.8)',
         borderRadius: '16px',
         boxShadow: '0 2px 16px rgba(0,0,0,0.05)',
-        padding: '20px 24px'
+        padding: isMobile ? '16px' : '20px 24px'
       }}>
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -228,7 +240,8 @@ export const DashboardView = () => {
               border: '1.5px solid #E2E8F0',
               borderRadius: '10px',
               fontSize: '12px', fontWeight: 600,
-              cursor: 'pointer'
+              cursor: 'pointer',
+              minHeight: isMobile ? '40px' : undefined
             }}
           >
             Full Timetable →
@@ -241,16 +254,18 @@ export const DashboardView = () => {
               key={cls.id}
               style={{
                 display: "flex",
-                alignItems: "center",
+                flexDirection: isMobile ? "column" : "row",
+                alignItems: isMobile ? "flex-start" : "center",
                 justifyContent: "space-between",
+                gap: isMobile ? "8px" : "16px",
                 padding: "14px 18px",
                 borderRadius: "12px",
                 background: "#F8FAFC",
                 border: "1px solid #E2E8F0"
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                <div style={{ fontWeight: 700, fontSize: "13px", width: "120px", color: "#475569" }}>
+              <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "flex-start" : "center", gap: isMobile ? "4px" : "16px" }}>
+                <div style={{ fontWeight: 700, fontSize: "13px", width: isMobile ? "auto" : "120px", color: "#475569" }}>
                   {cls.time}
                 </div>
                 <div>
@@ -292,14 +307,18 @@ export const DashboardView = () => {
       </div>
 
       {/* Side-by-side Section Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+        gap: "20px"
+      }}>
         {/* Pending Actions */}
         <div style={{
           background: '#FFFFFF',
           border: '1px solid rgba(226,232,240,0.8)',
           borderRadius: '16px',
           boxShadow: '0 2px 16px rgba(0,0,0,0.05)',
-          padding: '20px 24px'
+          padding: isMobile ? '16px' : '20px 24px'
         }}>
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -322,16 +341,16 @@ export const DashboardView = () => {
                     Date: {lv.startDate} | {lv.subject}
                   </div>
                   {(role === "Admin" || role === "Branch Coordinator") && (
-                    <div style={{ display: "flex", gap: "6px" }}>
+                    <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                       <button
                         onClick={() => approveLeaveRequest(lv.id)}
-                        style={{ padding: "5px 10px", background: "linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)", color: "#FFF", border: "none", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                        style={{ padding: "5px 10px", background: "linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)", color: "#FFF", border: "none", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer", minHeight: isMobile ? '40px' : undefined }}
                       >
                         Approve & Cover
                       </button>
                       <button
                         onClick={() => rejectLeaveRequest(lv.id, "Rejected")}
-                        style={{ padding: "5px 10px", background: "transparent", color: "#EF4444", border: "1px solid #FECACA", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}
+                        style={{ padding: "5px 10px", background: "transparent", color: "#EF4444", border: "1px solid #FECACA", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: "pointer", minHeight: isMobile ? '40px' : undefined }}
                       >
                         Reject
                       </button>
@@ -354,7 +373,7 @@ export const DashboardView = () => {
                   {(role === "Admin" || role === "Branch Coordinator") && (
                     <button
                       onClick={() => approveBookRequisition(req.id)}
-                      style={{ padding: "5px 10px", background: "linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)", color: "#FFF", border: "none", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                      style={{ padding: "5px 10px", background: "linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)", color: "#FFF", border: "none", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer", minHeight: isMobile ? '40px' : undefined }}
                     >
                       Approve & Queue Printing
                     </button>
@@ -377,7 +396,7 @@ export const DashboardView = () => {
           border: '1px solid rgba(226,232,240,0.8)',
           borderRadius: '16px',
           boxShadow: '0 2px 16px rgba(0,0,0,0.05)',
-          padding: '20px 24px'
+          padding: isMobile ? '16px' : '20px 24px'
         }}>
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -395,7 +414,8 @@ export const DashboardView = () => {
                 border: '1px solid #E2E8F0',
                 borderRadius: '8px',
                 fontSize: '12px', fontWeight: 600,
-                cursor: 'pointer'
+                cursor: 'pointer',
+                minHeight: isMobile ? '40px' : undefined
               }}
             >
               Compose Broadcast

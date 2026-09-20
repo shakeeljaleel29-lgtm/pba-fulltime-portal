@@ -2,8 +2,8 @@ import React from "react";
 import { useApp } from "../../context/AppContext";
 import { T } from "../../theme";
 
-export const Sidebar = ({ onOpenPasswordModal }) => {
-  const { data, activeTab, setActiveTab, currentUser, isNavOpen, setIsNavOpen, logout, filterByBranch, effectiveBranch } = useApp();
+export const Sidebar = ({ onOpenPasswordModal, sidebarOpen, setSidebarOpen, isMobile }) => {
+  const { data, activeTab, setActiveTab, currentUser, logout, filterByBranch, effectiveBranch } = useApp();
 
   const pendingLeaves = filterByBranch(data.leaveRequests || []).filter((l) => l.status === "Pending").length;
   const pendingReqs = filterByBranch(data.bookRequisitions || []).filter((r) => r.status === "Pending").length;
@@ -158,26 +158,42 @@ export const Sidebar = ({ onOpenPasswordModal }) => {
   const branchLabel = effectiveBranch === "All" ? "All Branches" : `${effectiveBranch} Branch`;
   const userInitials = currentUser?.name ? currentUser.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) : "PBA";
 
+  const handleNavClick = (id) => {
+    setActiveTab(id);
+    if (setSidebarOpen) {
+      setSidebarOpen(false);
+    }
+  };
+
   return (
     <>
-      <div
-        className={`sidebar-overlay ${isNavOpen ? "visible" : ""}`}
-        onClick={() => setIsNavOpen(false)}
-      />
+      {/* Mobile Dark Overlay */}
+      {isMobile && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(15,23,42,0.5)',
+            zIndex: 999,
+            backdropFilter: 'blur(2px)'
+          }}
+        />
+      )}
 
       <aside
-        className={`sidebar ${isNavOpen ? "open" : ""}`}
         style={{
-          width: '240px',
+          width: isMobile ? '260px' : '240px',
           minHeight: '100vh',
           background: T.sidebarBg,
           display: 'flex',
           flexDirection: 'column',
           position: 'fixed',
           left: 0, top: 0, bottom: 0,
-          zIndex: 100,
+          zIndex: 1000,
           boxShadow: '4px 0 24px rgba(0,0,0,0.15)',
-          overflowY: 'auto'
+          overflowY: 'auto',
+          transform: isMobile ? (sidebarOpen ? 'translateX(0)' : 'translateX(-100%)') : 'none',
+          transition: isMobile ? 'transform 0.25s ease' : 'none'
         }}
       >
         {/* LOGO / BRAND AREA */}
@@ -194,12 +210,18 @@ export const Sidebar = ({ onOpenPasswordModal }) => {
               fontSize: '16px', fontWeight: 800, color: '#FFFFFF',
               boxShadow: T.primaryShadow
             }}>P</div>
-            <div>
+            <div style={{ flex: 1 }}>
               <div style={{ fontSize: '14px', fontWeight: 800, color: '#F8FAFC',
                 letterSpacing: '-0.3px' }}>PBA</div>
               <div style={{ fontSize: '10px', fontWeight: 600, color: '#64748B',
                 textTransform: 'uppercase', letterSpacing: '0.6px' }}>Full-Time Portal</div>
             </div>
+            {isMobile && (
+              <button
+                onClick={() => setSidebarOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '20px', cursor: 'pointer', padding: '4px' }}
+              >×</button>
+            )}
           </div>
           {/* Branch badge */}
           <div style={{
@@ -228,10 +250,7 @@ export const Sidebar = ({ onOpenPasswordModal }) => {
                 return (
                   <button
                     key={item.id}
-                    onClick={() => {
-                      setActiveTab(item.id);
-                      setIsNavOpen(false);
-                    }}
+                    onClick={() => handleNavClick(item.id)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '10px',
                       padding: isActive ? '9px 16px 9px 13px' : '9px 16px',
@@ -245,19 +264,8 @@ export const Sidebar = ({ onOpenPasswordModal }) => {
                       border: 'none',
                       borderLeft: isActive ? '3px solid #6366F1' : 'none',
                       width: 'calc(100% - 16px)',
-                      textAlign: 'left'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                        e.currentTarget.style.color = '#F8FAFC';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.background = 'transparent';
-                        e.currentTarget.style.color = '#94A3B8';
-                      }
+                      textAlign: 'left',
+                      minHeight: isMobile ? '40px' : undefined
                     }}
                   >
                     <div style={{ width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -283,10 +291,7 @@ export const Sidebar = ({ onOpenPasswordModal }) => {
                 return (
                   <button
                     key={item.id}
-                    onClick={() => {
-                      setActiveTab(item.id);
-                      setIsNavOpen(false);
-                    }}
+                    onClick={() => handleNavClick(item.id)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '10px',
                       padding: isActive ? '9px 16px 9px 13px' : '9px 16px',
@@ -300,19 +305,8 @@ export const Sidebar = ({ onOpenPasswordModal }) => {
                       border: 'none',
                       borderLeft: isActive ? '3px solid #6366F1' : 'none',
                       width: 'calc(100% - 16px)',
-                      textAlign: 'left'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                        e.currentTarget.style.color = '#F8FAFC';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.background = 'transparent';
-                        e.currentTarget.style.color = '#94A3B8';
-                      }
+                      textAlign: 'left',
+                      minHeight: isMobile ? '40px' : undefined
                     }}
                   >
                     <div style={{ width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -338,7 +332,10 @@ export const Sidebar = ({ onOpenPasswordModal }) => {
 
         {/* USER AREA (bottom of sidebar) */}
         <div
-          onClick={onOpenPasswordModal}
+          onClick={() => {
+            onOpenPasswordModal();
+            if (isMobile && setSidebarOpen) setSidebarOpen(false);
+          }}
           style={{
             marginTop: 'auto',
             borderTop: '1px solid rgba(255,255,255,0.06)',

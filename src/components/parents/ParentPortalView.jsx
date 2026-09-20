@@ -139,8 +139,8 @@ export const ParentPortalView = () => {
             </p>
           </div>
 
-          <div style={{ padding: "16px 22px 22px 22px", overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div style={{ padding: isMobile ? "12px" : "16px 22px 22px 22px", overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+            <table style={{ minWidth: "600px", width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#F8F9FA" }}>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Registration No</th>

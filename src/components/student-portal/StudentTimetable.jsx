@@ -45,8 +45,8 @@ export const StudentTimetable = ({ student }) => {
           Your timetable will appear here once it has been published by your coordinator.
         </div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table className="custom-table" style={{ borderCollapse: "collapse", width: "100%", textAlign: "center" }}>
+        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', borderRadius: '12px' }}>
+          <table className="custom-table" style={{ minWidth: '700px', borderCollapse: "collapse", width: "100%", textAlign: "center" }}>
             <thead>
               <tr style={{ background: "#F8FAFC" }}>
                 <th style={{ width: "80px", textAlign: "center" }}>Time</th>

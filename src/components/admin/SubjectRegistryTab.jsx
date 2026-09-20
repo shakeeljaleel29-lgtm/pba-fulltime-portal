@@ -14,8 +14,9 @@ const PRESET_COLORS = [
   "#DD6B20"  // Orange
 ];
 
-export const SubjectRegistryTab = () => {
-  const { data, addSubject, updateSubject, deleteSubject, assignBatchSubjects, effectiveBranch } = useApp();
+export const SubjectRegistryTab = ({ isMobile }) => {
+  const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
+  const { data, addSubject, updateSubject, assignBatchLecturers, currentUser, showToast } = useApp();
 
   // Subject Modal State
   const [showSubjectModal, setShowSubjectModal] = useState(false);
@@ -290,8 +291,8 @@ export const SubjectRegistryTab = () => {
           marginBottom: "32px"
         }}
       >
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+          <table style={{ minWidth: "600px", width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#F8F9FA" }}>
                 <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left', whiteSpace: 'nowrap' }}>Code</th>
@@ -620,8 +621,8 @@ export const SubjectRegistryTab = () => {
 
       {/* 3. ADD / EDIT SUBJECT MODAL */}
       {showSubjectModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "480px", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "480px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
             <button
               onClick={() => setShowSubjectModal(false)}
               style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -734,8 +735,8 @@ export const SubjectRegistryTab = () => {
 
       {/* EDIT SUBJECT ASSIGNMENT MODAL (MAIN & ASSISTANT LECTURERS) */}
       {showAssignModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "560px", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "560px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
             <button
               onClick={() => setShowAssignModal(false)}
               style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}

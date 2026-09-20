@@ -258,8 +258,9 @@ const shouldShowSession = (session, weekStartDate) => {
   return true;
 };
 
-export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatchManager = null }) => {
+export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatchManager = null, isMobile }) => {
   const { data } = useApp();
+  const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
 
   const [weekStartDate, setWeekStartDate] = useState(() => getMonday(new Date()));
 
@@ -957,10 +958,11 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
           border: "1px solid #E3E6EA",
           borderRadius: "12px",
           overflowX: "auto",
+          WebkitOverflowScrolling: "touch",
           boxShadow: "0 1px 4px rgba(0,0,0,0.05)"
         }}
       >
-        <div style={{ minWidth: activeDays.length * 160 + 80 + "px" }}>
+        <div style={{ minWidth: Math.max(700, activeDays.length * 160 + 80) + "px" }}>
           <div
             style={{
               display: "grid",
@@ -1238,8 +1240,8 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
 
       {/* ADD / EDIT SESSION MODAL */}
       {showModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "100%", maxWidth: "580px", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "580px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
             <div style={{ padding: "18px 24px", borderBottom: "1px solid #E3E6EA", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>
                 {editingSession ? "Edit Session" : "Schedule a Session"}
@@ -1591,8 +1593,8 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
 
       {/* MODAL: PRINT OPTIONS MODAL */}
       {showPrintModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: "100%", maxWidth: "480px", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "480px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>Print / Export Timetable</h3>
               <button onClick={() => setShowPrintModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A0AEC0" }}>

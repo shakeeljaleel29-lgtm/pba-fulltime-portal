@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useApp } from "../../context/AppContext";
 import { T } from "../../theme";
 
-export const TopHeader = ({ onOpenPasswordModal }) => {
+export const TopHeader = ({ onOpenPasswordModal, sidebarOpen, setSidebarOpen, isMobile }) => {
   const {
     data,
     activeTab,
@@ -11,9 +11,7 @@ export const TopHeader = ({ onOpenPasswordModal }) => {
     selectedBranch,
     setSelectedBranch,
     unreadNotifications,
-    setIsNavOpen,
     markAllNotificationsRead,
-    logout
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -34,16 +32,16 @@ export const TopHeader = ({ onOpenPasswordModal }) => {
     dashboard: "Dashboard Overview",
     analytics: "Analytics & Reports",
     calendar: "Academic Calendar",
-    lecturers: "Lecturer Management & Leave System",
-    students: "Student Database & Attendance",
-    fees: "Fee Management & Ledger",
-    books: "Textbook Requisitions & Catalogue",
-    printing: "Printing Queue & Back Office Workflow",
-    exams: "Examinations & Term Test Marks",
-    communications: "Communications & Message Broadcasts",
-    parents: "Parent Communication Portal",
-    documents: "Document Vault & Template Letters",
-    admin: "General Administration & Schedules"
+    lecturers: "Lecturers & Leave System",
+    students: "Student Database",
+    fees: "Fee Management",
+    books: "Textbook Catalogue",
+    printing: "Printing Queue",
+    exams: "Examinations",
+    communications: "Communications",
+    parents: "Parent Portal",
+    documents: "Document Vault",
+    admin: "General Admin"
   };
 
   const currentPageTitle = titleMap[activeTab] || "Portal";
@@ -73,7 +71,7 @@ export const TopHeader = ({ onOpenPasswordModal }) => {
 
   return (
     <header style={{
-      position: 'fixed', top: 0, left: '240px', right: 0,
+      position: 'fixed', top: 0, left: isMobile ? '0' : '240px', right: 0,
       height: '60px',
       background: 'rgba(255,255,255,0.92)',
       backdropFilter: 'blur(12px)',
@@ -81,18 +79,33 @@ export const TopHeader = ({ onOpenPasswordModal }) => {
       borderBottom: '1px solid rgba(226,232,240,0.8)',
       boxShadow: '0 1px 12px rgba(0,0,0,0.04)',
       display: 'flex', alignItems: 'center',
-      padding: '0 28px',
-      gap: '16px',
+      padding: isMobile ? '0 16px' : '0 28px',
+      gap: isMobile ? '8px' : '16px',
       zIndex: 99
     }}>
+      {/* Hamburger Button for Mobile */}
+      <button
+        onClick={() => setSidebarOpen && setSidebarOpen(true)}
+        style={{
+          display: isMobile ? 'flex' : 'none',
+          alignItems: 'center', justifyContent: 'center',
+          width: '36px', height: '36px',
+          background: 'none', border: 'none',
+          cursor: 'pointer', color: '#0F172A',
+          fontSize: '20px', marginRight: '4px'
+        }}
+      >☰</button>
+
       {/* Page Title */}
       <h1 style={{
-        fontSize: '17px', fontWeight: 800, color: '#0F172A',
-        margin: 0, letterSpacing: '-0.4px'
+        fontSize: isMobile ? '15px' : '17px', fontWeight: 800, color: '#0F172A',
+        margin: 0, letterSpacing: '-0.4px',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
       }}>{currentPageTitle}</h1>
 
-      {/* Search Bar */}
+      {/* Search Bar (Desktop only) */}
       <div style={{
+        display: isMobile ? 'none' : 'flex',
         flex: 1, maxWidth: '360px',
         position: 'relative', marginLeft: 'auto'
       }}>
@@ -188,10 +201,10 @@ export const TopHeader = ({ onOpenPasswordModal }) => {
           value={selectedBranch}
           onChange={(e) => setSelectedBranch(e.target.value)}
           style={{
-            padding: '8px 12px', background: '#F8FAFC',
+            padding: isMobile ? '6px 8px' : '8px 12px', background: '#F8FAFC',
             border: '1px solid #E2E8F0', borderRadius: '10px',
-            fontSize: '13px', fontWeight: 600, color: '#0F172A',
-            cursor: 'pointer', outline: 'none'
+            fontSize: isMobile ? '11px' : '13px', fontWeight: 600, color: '#0F172A',
+            cursor: 'pointer', outline: 'none', marginLeft: 'auto'
           }}
         >
           <option value="All">All Branches</option>
@@ -202,7 +215,7 @@ export const TopHeader = ({ onOpenPasswordModal }) => {
       )}
 
       {/* Notification Bell */}
-      <div style={{ position: 'relative', cursor: 'pointer' }} data-notif-root onClick={() => setShowNotifications(!showNotifications)}>
+      <div style={{ position: 'relative', cursor: 'pointer', marginLeft: currentUser.role === "Branch Coordinator" ? "auto" : undefined }} data-notif-root onClick={() => setShowNotifications(!showNotifications)}>
         <span style={{ fontSize: '20px' }}>🔔</span>
         {unreadCount > 0 && (
           <span style={{
@@ -217,7 +230,7 @@ export const TopHeader = ({ onOpenPasswordModal }) => {
         {/* Notifications Panel */}
         {showNotifications && (
           <div style={{
-            position: "absolute", top: "36px", right: 0, width: "320px",
+            position: "absolute", top: "36px", right: 0, width: isMobile ? "280px" : "320px",
             background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "16px",
             boxShadow: "0 12px 32px rgba(0,0,0,0.15)", zIndex: 500, overflow: "hidden"
           }} onClick={(e) => e.stopPropagation()}>
