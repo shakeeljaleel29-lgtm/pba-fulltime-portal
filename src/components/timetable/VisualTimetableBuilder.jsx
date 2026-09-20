@@ -456,29 +456,61 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
     link.remove();
   };
 
+  // Auto-fill Lecturer & Assistant when Subject changes
+  useEffect(() => {
+    if (!sessionForm.subjectId || !sessionForm.batchId) return;
+    const modalSelectedBatch = (batches || []).find((b) => b.id === sessionForm.batchId);
+    const bSubjects = modalSelectedBatch?.subjects || modalSelectedBatch?.batchSubjects || [];
+    const assignedSubject = (bSubjects || []).find(
+      (bs) => (bs.subjectId || bs.id) === sessionForm.subjectId
+    );
+    if (assignedSubject?.lecturerId || assignedSubject?.mainLecturerId) {
+      const mainLecId = assignedSubject.lecturerId || assignedSubject.mainLecturerId;
+      const asstId = assignedSubject.assistantId || "";
+      setSessionForm((prev) => {
+        if (prev.lecturerId === mainLecId && prev.assistantId === asstId) return prev;
+        return {
+          ...prev,
+          lecturerId: mainLecId,
+          assistantId: asstId
+        };
+      });
+    }
+  }, [sessionForm.subjectId, sessionForm.batchId, batches]);
+
   // Save session handler
   const handleSaveSession = (e) => {
     e.preventDefault();
-    const batch = batches.find((b) => b.id === sessionForm.batchId);
-    const subj = subjects.find((s) => s.id === sessionForm.subjectId);
-    const cls = classrooms.find((c) => c.id === sessionForm.classroomId);
-    const lec = allLecturers.find((u) => u.id === sessionForm.lecturerId);
+    if (!sessionForm.batchId || !sessionForm.subjectId) return;
+
+    const modalSelectedBatch = (batches || []).find((b) => b.id === sessionForm.batchId);
+    const bSubjects = modalSelectedBatch?.subjects || modalSelectedBatch?.batchSubjects || [];
+    const bSubjEntry = (bSubjects || []).find((bs) => (bs.subjectId || bs.id) === sessionForm.subjectId);
+    const subObj = (subjects || []).find((s) => s.id === sessionForm.subjectId);
+    const cls = (classrooms || []).find((c) => c.id === sessionForm.classroomId);
+    const lec = (allLecturers || []).find((u) => u.id === sessionForm.lecturerId);
+    const asst = (allLecturers || []).find((u) => u.id === sessionForm.assistantId);
 
     const newSessObj = {
       id: editingSession ? editingSession.id : "sess-" + Date.now(),
       day: sessionForm.day,
+      dayOfWeek: sessionForm.day,
       startTime: sessionForm.startTime,
       endTime: sessionForm.endTime,
       batchId: sessionForm.batchId,
-      batchName: batch?.name || "Batch",
+      batchName: modalSelectedBatch?.name || "Batch",
+      batchCode: modalSelectedBatch?.code || modalSelectedBatch?.shortCode || "",
+      batchShortCode: modalSelectedBatch?.code || modalSelectedBatch?.shortCode || "",
       subjectId: sessionForm.subjectId,
-      subjectName: subj?.name || "Subject",
+      subjectName: bSubjEntry?.subjectName || bSubjEntry?.name || subObj?.name || "Subject",
+      subjectCode: bSubjEntry?.subjectCode || bSubjEntry?.code || subObj?.code || "SUB",
       classroomId: sessionForm.classroomId,
       classroomName: cls?.name || "Room",
       lecturerId: sessionForm.lecturerId,
-      lecturerName: lec?.name || "Lecturer",
-      assistantId: sessionForm.assistantId || null,
-      branch: sessionForm.branch || batch?.branch || getBranches()[0] || "Kohuwala",
+      lecturerName: lec?.name || "",
+      assistantId: sessionForm.assistantId || "",
+      assistantName: asst?.name || "",
+      branch: sessionForm.branch || modalSelectedBatch?.branch || getBranches()[0] || "Kohuwala",
       isRecurring: sessionForm.recurrence !== "once",
       recurrence: sessionForm.recurrence || "weekly",
       recurrenceStartDate: sessionForm.recurrenceStartDate || null,
@@ -486,9 +518,10 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
       specificDate: sessionForm.specificDate || null,
       sessionType: sessionForm.sessionType || "Class",
       notes: sessionForm.notes || "",
-      color: batch?.color || "#2B6CB0",
+      color: modalSelectedBatch?.color || "#2B6CB0",
       isLocked: sessionForm.isLocked || false,
-      createdAt: editingSession ? editingSession.createdAt : new Date().toISOString()
+      createdAt: editingSession ? editingSession.createdAt : new Date().toISOString(),
+      createdOn: editingSession ? (editingSession.createdOn || editingSession.createdAt) : new Date().toISOString()
     };
 
     const clashResult = detectClashes(
@@ -513,6 +546,7 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
 
     setSessions(updated);
     saveLS("pba_timetable_sessions", updated);
+    saveLS("pba_timetable", updated);
     setShowModal(false);
   };
 
@@ -520,17 +554,19 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
     const updated = sessions.filter((s) => s.id !== id);
     setSessions(updated);
     saveLS("pba_timetable_sessions", updated);
+    saveLS("pba_timetable", updated);
     setShowModal(false);
   };
 
   const handleOpenAddModal = (day = daysFull[0] || "Monday", startTime = ttConfig.startTime || "08:00") => {
-    const defaultBatch = activeBatchId !== "all" ? batches.find((b) => b.id === activeBatchId) : batches[0];
+    const defaultBatch = activeBatchId !== "all" ? (batches || []).find((b) => b.id === activeBatchId) : (batches || [])[0];
     const defaultBatchId = defaultBatch?.id || "";
-    const defaultSubj = defaultBatch?.batchSubjects?.[0];
-    const defaultSubjId = defaultSubj?.subjectId || subjects[0]?.id || "";
-    const defaultLecId = defaultSubj?.mainLecturerId || "";
+    const bSubjs = defaultBatch?.subjects || defaultBatch?.batchSubjects || [];
+    const defaultSubj = bSubjs[0];
+    const defaultSubjId = defaultSubj?.subjectId || defaultSubj?.id || (subjects || [])[0]?.id || "";
+    const defaultLecId = defaultSubj?.lecturerId || defaultSubj?.mainLecturerId || "";
     const defaultAsstId = defaultSubj?.assistantId || "";
-    const defaultRec = defaultSubj?.defaultRecurrence || "weekly";
+    const defaultRec = defaultSubj?.defaultRecurrence || defaultSubj?.recurrence || "weekly";
 
     const endH = (parseInt(startTime.split(":")[0]) + 2).toString().padStart(2, "0");
     const endTime = `${endH}:00`;
@@ -544,7 +580,7 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
       day: day,
       startTime: startTime,
       endTime: endTime,
-      classroomId: classrooms[0]?.id || "",
+      classroomId: (classrooms || [])[0]?.id || "",
       sessionType: getSessionTypes()[0]?.id || "Class",
       branch: defaultBatch?.branch || getBranches()[0] || "Kohuwala",
       notes: "",
@@ -611,7 +647,23 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
     allLecturers
   );
 
-  const selectedBatch = batches.find((b) => b.id === activeBatchId);
+  const modalSelectedBatch = (batches || []).find((b) => b.id === sessionForm.batchId);
+  const modalBatchSubjects = modalSelectedBatch?.subjects || modalSelectedBatch?.batchSubjects || [];
+
+  const modalAvailableLecturers = (allLecturers || []).filter((l) =>
+    (l.subjects || []).includes(sessionForm.subjectId) ||
+    (l.subjectIds || []).includes(sessionForm.subjectId) ||
+    modalBatchSubjects.some((bs) =>
+      (bs.subjectId === sessionForm.subjectId || bs.id === sessionForm.subjectId) &&
+      (bs.lecturerId === l.id || bs.mainLecturerId === l.id)
+    )
+  );
+
+  const modalLecturerOptions = modalAvailableLecturers.length > 0
+    ? modalAvailableLecturers
+    : (allLecturers || []);
+
+  const selectedBatch = (batches || []).find((b) => b.id === activeBatchId);
 
   return (
     <div style={{ position: "relative" }}>
@@ -1279,22 +1331,20 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                     value={sessionForm.batchId}
                     onChange={(e) => {
                       const bId = e.target.value;
-                      const targetBatch = batches.find((b) => b.id === bId);
-                      const sub = targetBatch?.batchSubjects?.[0];
-                      setSessionForm({
-                        ...sessionForm,
+                      setSessionForm((prev) => ({
+                        ...prev,
                         batchId: bId,
-                        subjectId: sub?.subjectId || "",
-                        lecturerId: sub?.mainLecturerId || "",
-                        assistantId: sub?.assistantId || "",
-                        branch: targetBatch?.branch || sessionForm.branch
-                      });
+                        subjectId: "",
+                        lecturerId: "",
+                        assistantId: ""
+                      }));
                     }}
                     style={{ width: "100%", padding: "8px 10px", border: "1px solid #E3E6EA", borderRadius: "7px", fontSize: "13px" }}
                   >
-                    {batches.map((b) => (
+                    <option value="">— Select Batch —</option>
+                    {(batches || []).map((b) => (
                       <option key={b.id} value={b.id}>
-                        {b.name} ({b.code})
+                        {b.name} ({b.code || b.shortCode || "BATCH"})
                       </option>
                     ))}
                   </select>
@@ -1306,26 +1356,37 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                     value={sessionForm.subjectId}
                     onChange={(e) => {
                       const sId = e.target.value;
-                      const batch = batches.find((b) => b.id === sessionForm.batchId);
-                      const bsub = batch?.batchSubjects?.find((s) => s.subjectId === sId);
-                      setSessionForm({
-                        ...sessionForm,
-                        subjectId: sId,
-                        lecturerId: bsub?.mainLecturerId || sessionForm.lecturerId,
-                        assistantId: bsub?.assistantId || sessionForm.assistantId
-                      });
+                      setSessionForm((prev) => ({ ...prev, subjectId: sId }));
                     }}
-                    style={{ width: "100%", padding: "8px 10px", border: "1px solid #E3E6EA", borderRadius: "7px", fontSize: "13px" }}
+                    disabled={!sessionForm.batchId}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      border: "1px solid #E3E6EA",
+                      borderRadius: "7px",
+                      fontSize: "13px",
+                      opacity: !sessionForm.batchId ? 0.5 : 1
+                    }}
                   >
-                    {(selectedBatch?.batchSubjects || []).map((bs) => {
-                      const subObj = subjects.find((s) => s.id === bs.subjectId);
+                    <option value="">— Select Subject —</option>
+                    {(modalBatchSubjects || []).map((bs) => {
+                      const sId = bs.subjectId || bs.id;
+                      const subObj = (subjects || []).find((s) => s.id === sId);
+                      const sName = bs.subjectName || bs.name || subObj?.name || sId;
+                      const sCode = bs.subjectCode || bs.code || subObj?.code || "SUB";
                       return (
-                        <option key={bs.subjectId} value={bs.subjectId}>
-                          {subObj?.name || bs.subjectId} ({subObj?.stream || "elective"})
+                        <option key={sId} value={sId}>
+                          {sName} ({sCode})
                         </option>
                       );
                     })}
                   </select>
+                  {sessionForm.batchId && modalBatchSubjects.length === 0 && (
+                    <p style={{ fontSize: "11px", color: "#E53E3E", margin: "4px 0 0" }}>
+                      ⚠ No subjects assigned to this batch yet.
+                      Go to Batch Manager → Edit Batch → Assign Subjects first.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1334,11 +1395,19 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                   <label style={{ display: "block", fontSize: "10px", fontWeight: 700, color: "#718096", textTransform: "uppercase", marginBottom: "4px" }}>Lecturer</label>
                   <select
                     value={sessionForm.lecturerId}
-                    onChange={(e) => setSessionForm({ ...sessionForm, lecturerId: e.target.value })}
-                    style={{ width: "100%", padding: "8px 10px", border: "1px solid #E3E6EA", borderRadius: "7px", fontSize: "13px" }}
+                    onChange={(e) => setSessionForm((prev) => ({ ...prev, lecturerId: e.target.value }))}
+                    disabled={!sessionForm.subjectId}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      border: "1px solid #E3E6EA",
+                      borderRadius: "7px",
+                      fontSize: "13px",
+                      opacity: !sessionForm.subjectId ? 0.5 : 1
+                    }}
                   >
                     <option value="">— Select Lecturer —</option>
-                    {allLecturers.map((u) => {
+                    {(modalLecturerOptions || []).map((u) => {
                       const isAvail = isLecturerAvailable(u.id, sessionForm.day, sessionForm.startTime, sessionForm.endTime, allLecturers);
                       return (
                         <option key={u.id} value={u.id}>
@@ -1352,12 +1421,12 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                 <div>
                   <label style={{ display: "block", fontSize: "10px", fontWeight: 700, color: "#718096", textTransform: "uppercase", marginBottom: "4px" }}>Assistant (Optional)</label>
                   <select
-                    value={sessionForm.assistantId}
-                    onChange={(e) => setSessionForm({ ...sessionForm, assistantId: e.target.value })}
+                    value={sessionForm.assistantId || ""}
+                    onChange={(e) => setSessionForm((prev) => ({ ...prev, assistantId: e.target.value }))}
                     style={{ width: "100%", padding: "8px 10px", border: "1px solid #E3E6EA", borderRadius: "7px", fontSize: "13px" }}
                   >
                     <option value="">— No Assistant —</option>
-                    {allLecturers
+                    {(allLecturers || [])
                       .filter((u) => u.id !== sessionForm.lecturerId)
                       .map((u) => (
                         <option key={u.id} value={u.id}>
