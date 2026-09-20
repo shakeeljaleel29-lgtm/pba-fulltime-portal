@@ -121,16 +121,84 @@ const LecturerManagementViewInner = ({ isMobile }) => {
   const [filterSubject, setFilterSubject] = useState("");
   const [filterBatch, setFilterBatch] = useState("");
 
-  // Session Log State
-  const [logLecturerFilter, setLogLecturerFilter] = useState("All");
-  const [filterBatchId, setFilterBatchId] = useState("");
-  const [filterSubjectId, setFilterSubjectId] = useState("");
-  const [filterStatus, setFilterStatus] = useState("");
-  const [logPeriod, setLogPeriod] = useState("This Month");
-  const [logCustomFrom, setLogCustomFrom] = useState("");
-  const [logCustomTo, setLogCustomTo] = useState("");
+  // Source data — read fresh on mount and after any status update
+  const [timetable, setTimetable] = useState(
+    () => safeLS('pba_timetable', [])
+  );
+  const [leaveRequests, setLeaveRequests] = useState(
+    () => safeLS('pba_leave_requests', [])
+  );
+
+  useEffect(() => {
+    setTimetable(safeLS('pba_timetable', []));
+    setLeaveRequests(safeLS('pba_leave_requests', []));
+  }, []);
+
+  // Session Log filter state
+  const [logLecturerId, setLogLecturerId] = useState('');
+  const [logBatchId, setLogBatchId] = useState('');
+  const [logSubjectId, setLogSubjectId] = useState('');
+  const [logStatus, setLogStatus] = useState('');       // '' = All Statuses
+  const [logRange, setLogRange] = useState('month');    // 'week'|'month'|'year'|'custom'
+  const [logCustomStart, setLogCustomStart] = useState('');
+  const [logCustomEnd, setLogCustomEnd] = useState('');
   const [logIncludeUpcoming, setLogIncludeUpcoming] = useState(false);
-  const [logPage, setLogPage] = useState(1);
+
+  // Toast for status save confirmation
+  const [statusToast, setStatusToast] = useState('');  // '' | 'Conducted' | 'Missed' etc.
+
+  const getLogDateRange = () => {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    let start, end;
+    if (logRange === 'week') {
+      const dow = today.getDay();
+      start = new Date(today);
+      start.setDate(start.getDate() - dow);
+      start.setHours(0, 0, 0, 0);
+      end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+    } else if (logRange === 'month') {
+      start = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0, 0);
+      end = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else if (logRange === 'year') {
+      start = new Date(today.getFullYear(), 0, 1, 0, 0, 0, 0);
+      end = new Date(today.getFullYear(), 11, 31, 23, 59, 59, 999);
+    } else if (logRange === 'custom' && logCustomStart && logCustomEnd) {
+      start = new Date(logCustomStart + 'T00:00:00');
+      end = new Date(logCustomEnd + 'T23:59:59');
+    } else {
+      // Default: current month
+      start = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0, 0);
+      end = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+    }
+    return { start, end };
+  };
+
+  const hasApprovedLeave = (lecturerId, sessionDate) => {
+    if (!lecturerId || !sessionDate) return false;
+    const sDate = new Date(sessionDate + 'T12:00:00');
+    return (leaveRequests || []).some(lr => {
+      if (lr.lecturerId !== lecturerId) return false;
+      if (lr.status !== 'Approved') return false;
+      const from = new Date((lr.fromDate || lr.startDate || '') + 'T00:00:00');
+      const to   = new Date((lr.toDate   || lr.endDate   || lr.fromDate || lr.startDate || '') + 'T23:59:59');
+      return sDate >= from && sDate <= to;
+    });
+  };
+
+  const markSessionStatus = (sessionId, newStatus) => {
+    const updated = (timetable || []).map(s =>
+      s.id === sessionId ? { ...s, status: newStatus } : s
+    );
+    saveLS('pba_timetable', updated);
+    setTimetable(updated);
+
+    // Brief toast confirmation
+    setStatusToast(newStatus);
+    setTimeout(() => setStatusToast(''), 2500);
+  };
 
   const DEFAULT_AVAILABILITY = [
     { day: 'Monday', isAvailable: true, from: '08:00', to: '18:00' },
@@ -1591,263 +1659,159 @@ const LecturerManagementViewInner = ({ isMobile }) => {
 
       {/* TAB 5: SESSION LOG */}
       {activeTab === "sessionLog" && (() => {
-        const sessions = safeLS('pba_timetable_sessions', safeLS('pba_timetable', []));
-        const classChanges = safeLS('pba_class_changes', []);
-        const attendanceList = safeLS('pba_session_attendance', safeLS('pba_attendance', []));
-        const users = safeLS('pba_users', []);
-        const subjects = safeLS('pba_subjects', []);
         const batches = safeLS('pba_batches', []);
-        const classrooms = safeLS('pba_classrooms', []);
-        const students = safeLS('pba_students', []);
-        const enrollments = safeLS('pba_batch_enrollments', []);
-
-        const lecturerList = users.filter(u => u.role === 'Lecturer' || data?.lecturers?.some(l => l.id === u.id));
-        const todayStr = new Date().toISOString().split('T')[0];
-
-        const resolveSubjectName = (sess) => {
-          if (sess.subjectName && sess.subjectName !== 'Unknown Subject') {
-            return sess.subjectName;
-          }
-          if (sess.subjectId) {
-            const sub = (subjects || []).find(s => s.id === sess.subjectId || s.code === sess.subjectId);
-            if (sub?.name) return sub.name;
-          }
-          if (sess.subjectId && sess.batchId) {
-            const batch = (batches || []).find(b => b.id === sess.batchId);
-            const bSub = (batch?.subjects || []).find(bs => bs.subjectId === sess.subjectId);
-            if (bSub?.subjectName) return bSub.subjectName;
-          }
-          return sess.batchName || '—';
-        };
-
-        const resolveBatchName = (sess) => {
-          if (sess.batchName && sess.batchName !== 'Unknown Batch') return sess.batchName;
-          if (sess.batchId) {
-            const batch = (batches || []).find(b => b.id === sess.batchId);
-            return batch?.name || '—';
-          }
-          return '—';
-        };
-
-        const subjectOptions = filterBatchId
-          ? (() => {
-              const batch = (batches || []).find(b => b.id === filterBatchId);
-              return (batch?.subjects || []).map(bs => ({
-                id: bs.subjectId || bs.id, name: bs.subjectName || bs.name
-              })).filter(s => s.id);
-            })()
-          : (subjects || []).map(s => ({ id: s.id, name: s.name }));
-
-        // Determine date bounds
-        let startDate = new Date();
-        let endDate = new Date();
-        const now = new Date();
-
-        if (logPeriod === "This Week") {
-          const day = now.getDay();
-          const distToMon = day === 0 ? -6 : 1 - day;
-          startDate = new Date(now);
-          startDate.setDate(now.getDate() + distToMon);
-          endDate = new Date(startDate);
-          endDate.setDate(startDate.getDate() + 6);
-        } else if (logPeriod === "This Month") {
-          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-          endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        } else if (logPeriod === "This Year") {
-          startDate = new Date(now.getFullYear(), 0, 1);
-          endDate = new Date(now.getFullYear(), 11, 31);
-        } else if (logPeriod === "Custom Range") {
-          if (logCustomFrom) startDate = new Date(logCustomFrom);
-          if (logCustomTo) endDate = new Date(logCustomTo);
-        }
-
-        // Generate rows
-        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        const allLogRows = [];
-
-        // Iterate dates
-        const curr = new Date(startDate);
-        while (curr <= endDate) {
-          const dStr = curr.toISOString().split('T')[0];
-          const dayName = dayNames[curr.getDay()];
-
-          (sessions || []).forEach(sess => {
-            if (logLecturerFilter && logLecturerFilter !== "All" && sess.lecturerId !== logLecturerFilter) return;
-            if (filterBatchId && sess.batchId !== filterBatchId) return;
-            if (filterSubjectId && sess.subjectId !== filterSubjectId) return;
-
-            let matches = false;
-            if (sess.isMakeup && sess.date) {
-              if (sess.date === dStr) matches = true;
-            } else if (sess.day === dayName) {
-              matches = true;
+        const users = safeLS('pba_users', []);
+        const rawLecturers = (data?.lecturers || []);
+        const lecturers = (() => {
+          const list = [];
+          const added = new Set();
+          (rawLecturers || []).forEach(l => {
+            if (l.id && l.name) {
+              list.push({ id: l.id, name: l.name });
+              added.add(l.id);
             }
-
-            if (!matches) return;
-
-            // Resolve entities
-            const lectObj = users.find(u => u.id === sess.lecturerId) || (data?.lecturers || []).find(l => l.id === sess.lecturerId);
-            const roomObj = classrooms.find(r => r.id === sess.classroomId);
-
-            // Check class changes
-            const change = classChanges.find(c => c.sessionId === sess.id && c.date === dStr);
-            let status = 'Conducted';
-            let statusText = '✓ Conducted';
-            let statusStyle = { background: '#F0FFF4', color: '#276749' };
-
-            if (change && change.type === 'cancelled') {
-              if (change.substituteId) {
-                const subUser = users.find(u => u.id === change.substituteId);
-                status = 'Substituted';
-                statusText = `⇄ Substituted by ${subUser?.name || 'Substitute'}`;
-                statusStyle = { background: '#FFFBEB', color: '#B7860A' };
-              } else {
-                status = 'Cancelled';
-                statusText = '✕ Cancelled';
-                statusStyle = { background: '#FFF5F5', color: '#C53030' };
-              }
-            } else if (dStr > todayStr) {
-              status = 'Upcoming';
-              statusText = '◷ Upcoming';
-              statusStyle = { background: '#EBF4FF', color: '#2B6CB0' };
-            }
-
-            if (filterStatus) {
-              const sessionStatus = (status || '').toLowerCase();
-              if (!sessionStatus.includes(filterStatus.toLowerCase())) return;
-            }
-
-            // Attendance
-            const attRec = attendanceList.find(a => (a.sessionId === sess.id || a.sessionId === sess.sessionId) && a.date === dStr);
-            let attendanceStr = '—';
-            if (attRec && Array.isArray(attRec.records)) {
-              const presentCount = attRec.records.filter(r => r.status === 'present' || r.status === 'late').length;
-              let activeEnrolled = enrollments.filter(e => e.batchId === sess.batchId && e.status === 'active').length;
-              if (activeEnrolled === 0) activeEnrolled = attRec.records.length || students.length || 0;
-              attendanceStr = `${presentCount} / ${activeEnrolled}`;
-            }
-
-            // Date formatted: DD MMM YYYY
-            const dateObj = new Date(dStr + 'T00:00:00');
-            const dateDisplay = dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-
-            allLogRows.push({
-              id: `${sess.id}_${dStr}`,
-              rawDate: dStr,
-              dateDisplay,
-              dayName,
-              lecturerName: lectObj?.name || sess.lecturerName || 'Unknown Lecturer',
-              batchName: resolveBatchName(sess),
-              subjectName: resolveSubjectName(sess),
-              timeDisplay: `${sess.startTime || ''} – ${sess.endTime || ''}`,
-              classroomName: roomObj?.name || sess.classroomId || '—',
-              status,
-              statusText,
-              statusStyle,
-              attendanceStr,
-              isExtra: !!sess.isExtra,
-              extraNote: sess.extraNote || ''
-            });
           });
-
-          curr.setDate(curr.getDate() + 1);
-        }
-
-        // Stats calculation over ALL generated rows for selected filters
-        const totalScheduled = allLogRows.length;
-        const totalConducted = allLogRows.filter(r => r.status === 'Conducted').length;
-        const totalMissed = allLogRows.filter(r => r.status === 'Cancelled').length;
-        const totalSubstituted = allLogRows.filter(r => r.status === 'Substituted').length;
-        const totalExtra = allLogRows.filter(r => r.isExtra).length;
-        const attendRate = totalScheduled > 0 ? Math.round((totalConducted / totalScheduled) * 100) : 0;
-        const attendRateColor = attendRate >= 80 ? '#276749' : attendRate >= 60 ? '#B7860A' : '#C53030';
-
-        // Filter out upcoming if not toggled
-        const displayRows = allLogRows
-          .filter(r => logIncludeUpcoming || r.status !== 'Upcoming')
-          .sort((a, b) => b.rawDate.localeCompare(a.rawDate));
-
-        // Pagination
-        const pageSize = 30;
-        const totalPages = Math.ceil(displayRows.length / pageSize) || 1;
-        const paginatedRows = displayRows.slice((logPage - 1) * pageSize, logPage * pageSize);
-
-        // CSV export handler
-        const handleExportCSV = () => {
-          const headers = ['Date', 'Day', 'Lecturer', 'Batch', 'Subject', 'Time', 'Classroom', 'Status', 'Attendance'];
-          const csvLines = [headers.join(',')];
-
-          displayRows.forEach(r => {
-            const rowStr = [
-              `"${r.dateDisplay}"`,
-              `"${r.dayName}"`,
-              `"${r.lecturerName}"`,
-              `"${r.batchName}"`,
-              `"${r.subjectName}"`,
-              `"${r.timeDisplay}"`,
-              `"${r.classroomName}"`,
-              `"${r.statusText}"`,
-              `"${r.attendanceStr}"`
-            ].join(',');
-            csvLines.push(rowStr);
+          (users || []).forEach(u => {
+            if ((u.role === 'Lecturer' || u.role === 'lecturer') && u.id && u.name && !added.has(u.id)) {
+              list.push({ id: u.id, name: u.name });
+              added.add(u.id);
+            }
           });
+          (timetable || []).forEach(s => {
+            if (s.lecturerId && s.lecturerName && !added.has(s.lecturerId)) {
+              list.push({ id: s.lecturerId, name: s.lecturerName });
+              added.add(s.lecturerId);
+            }
+          });
+          return list;
+        })();
 
-          const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          const lectName = (logLecturerFilter === 'All' || !logLecturerFilter) ? 'AllLecturers' : (users.find(u => u.id === logLecturerFilter)?.name || 'Lecturer').replace(/\s+/g, '_');
-          link.setAttribute('href', url);
-          link.setAttribute('download', `session-log-${lectName}-${logPeriod.replace(/\s+/g, '_')}.csv`);
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        };
+        const { start: rangeStart, end: rangeEnd } = getLogDateRange();
+        const today = new Date();
+        today.setHours(23, 59, 59, 999);
+
+        const filteredSessions = (timetable || []).filter(s => {
+          // Lecturer filter
+          if (logLecturerId && s.lecturerId !== logLecturerId) return false;
+          // Batch filter
+          if (logBatchId && s.batchId !== logBatchId) return false;
+          // Subject filter
+          if (logSubjectId && s.subjectId !== logSubjectId) return false;
+          // Status filter
+          if (logStatus && (s.status || 'Scheduled') !== logStatus) return false;
+          // Date range
+          const sDate = new Date((s.date || '') + 'T12:00:00');
+          if (sDate < rangeStart || sDate > rangeEnd) return false;
+          // Exclude future sessions unless "Include upcoming" is checked
+          if (!logIncludeUpcoming && sDate > today) return false;
+          return true;
+        }).sort((a, b) => {
+          // Sort descending by date (most recent first)
+          const dA = new Date((a.date || '') + 'T12:00:00');
+          const dB = new Date((b.date || '') + 'T12:00:00');
+          return dB - dA;
+        });
+
+        // Stat counts (computed from filteredSessions — ignore extra status filter for counts)
+        const allInRange = (timetable || []).filter(s => {
+          if (logLecturerId && s.lecturerId !== logLecturerId) return false;
+          if (logBatchId && s.batchId !== logBatchId) return false;
+          if (logSubjectId && s.subjectId !== logSubjectId) return false;
+          const sDate = new Date((s.date || '') + 'T12:00:00');
+          if (sDate < rangeStart || sDate > rangeEnd) return false;
+          if (!logIncludeUpcoming && sDate > today) return false;
+          return true;
+        });
+
+        const scheduledCount   = (allInRange || []).filter(s =>
+          !s.status || s.status === 'Scheduled').length;
+        const conductedCount   = (allInRange || []).filter(s => s.status === 'Conducted').length;
+        const missedCount      = (allInRange || []).filter(s => s.status === 'Missed').length;
+        const substitutedCount = (allInRange || []).filter(s => s.status === 'Substituted').length;
+        const extraCount       = (allInRange || []).filter(s => s.isExtra).length;
+        const totalDone        = conductedCount + substitutedCount;
+        const totalMarkable    = conductedCount + missedCount + substitutedCount;
+        const attendRate       = totalMarkable > 0
+          ? Math.round((totalDone / totalMarkable) * 100) : 0;
 
         return (
-          <div style={{ background: theme.cardBg, border: "1px solid " + theme.cardBorder, borderRadius: "14px", boxShadow: "0 2px 10px rgba(0,0,0,0.06)", overflow: "hidden" }}>
-            <div style={{ padding: "16px 22px", borderBottom: "1px solid #F4F5F7", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#FFFFFF" }}>
-              <span style={{ fontFamily: t.fontHeading, fontSize: "15px", fontWeight: 600, color: theme.textPrimary, display: "flex", alignItems: "center", gap: "8px" }}>
+          <div style={{ marginTop: '20px' }}>
+            {/* SECTION HEADER ROW */}
+            <div style={{ display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between', marginBottom: '18px' }}>
+              <div style={{ fontWeight: 800, fontSize: '18px', color: '#1A202C' }}>
                 📋 Session Log & Attendance History
-              </span>
+              </div>
               <button
-                onClick={handleExportCSV}
-                style={{
-                  background: '#D4A017', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
+                onClick={() => {
+                  // CSV download of filteredSessions
+                  const headers = ['Date','Day','Subject','Batch','Lecturer',
+                    'Start','End','Status','Extra','Leave Flag'];
+                  const rows = (filteredSessions || []).map(s => [
+                    s.date || '',
+                    s.day || '',
+                    s.subjectName || s.subjectCode || '—',
+                    s.batchName || '—',
+                    s.lecturerName || '—',
+                    s.startTime || '',
+                    s.endTime || '',
+                    s.status || 'Scheduled',
+                    s.isExtra ? 'Yes' : 'No',
+                    hasApprovedLeave(s.lecturerId, s.date) ? 'Leave Approved' : ''
+                  ]);
+                  const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `session_log_${new Date().toISOString().slice(0,10)}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
                 }}
-              >
-                ⬇ Download CSV
+                style={{ padding: '8px 18px', borderRadius: '8px',
+                  background: '#D97706', border: 'none', color: 'white',
+                  fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+                ↓ Download CSV
               </button>
             </div>
 
-            <div style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: "16px" }}>
-              {/* FILTER BAR */}
-              <div style={{
-                display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center',
-                padding: '14px 16px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0'
-              }}>
-                {/* Lecturer dropdown */}
+            {/* FILTER BAR */}
+            <div style={{ background: '#F8F9FB', border: '1px solid #E3E6EA',
+              borderRadius: '12px', padding: '14px 16px', marginBottom: '16px' }}>
+
+              {/* Row 1: Dropdowns */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px',
+                alignItems: 'center', marginBottom: '12px' }}>
+
+                {/* LECTURER */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', whiteSpace: 'nowrap' }}>Lecturer:</span>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#374151' }}>
+                    Lecturer:
+                  </label>
                   <select
-                    value={logLecturerFilter}
-                    onChange={e => { setLogLecturerFilter(e.target.value); setLogPage(1); }}
-                    style={{ fontSize: '12px', padding: '6px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', color: '#1A202C', cursor: 'pointer', background: 'white' }}
-                  >
-                    <option value="All">All Lecturers</option>
-                    {lecturerList.map(l => (
+                    value={logLecturerId}
+                    onChange={e => setLogLecturerId(e.target.value)}
+                    style={{ padding: '7px 10px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '13px',
+                      background: 'white', minWidth: '160px' }}>
+                    <option value="">All Lecturers</option>
+                    {(lecturers || []).map(l => (
                       <option key={l.id} value={l.id}>{l.name}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Batch dropdown */}
+                {/* BATCH */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', whiteSpace: 'nowrap' }}>Batch:</span>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#374151' }}>
+                    Batch:
+                  </label>
                   <select
-                    value={filterBatchId}
-                    onChange={e => { setFilterBatchId(e.target.value); setFilterSubjectId(''); setLogPage(1); }}
-                    style={{ fontSize: '12px', padding: '6px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', color: '#1A202C', cursor: 'pointer', background: 'white' }}
-                  >
+                    value={logBatchId}
+                    onChange={e => setLogBatchId(e.target.value)}
+                    style={{ padding: '7px 10px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '13px',
+                      background: 'white', minWidth: '160px' }}>
                     <option value="">All Batches</option>
                     {(batches || []).map(b => (
                       <option key={b.id} value={b.id}>{b.name}</option>
@@ -1855,219 +1819,421 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                   </select>
                 </div>
 
-                {/* Subject dropdown */}
+                {/* SUBJECT */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', whiteSpace: 'nowrap' }}>Subject:</span>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#374151' }}>
+                    Subject:
+                  </label>
                   <select
-                    value={filterSubjectId}
-                    onChange={e => { setFilterSubjectId(e.target.value); setLogPage(1); }}
-                    disabled={subjectOptions.length === 0}
-                    style={{
-                      fontSize: '12px', padding: '6px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', color: '#1A202C', cursor: 'pointer', background: 'white',
-                      opacity: subjectOptions.length === 0 ? 0.5 : 1
-                    }}
-                  >
+                    value={logSubjectId}
+                    onChange={e => setLogSubjectId(e.target.value)}
+                    style={{ padding: '7px 10px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '13px',
+                      background: 'white', minWidth: '150px' }}>
                     <option value="">All Subjects</option>
-                    {subjectOptions.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
+                    {/* Derive unique subjects from timetable */}
+                    {[...new Map((timetable || [])
+                      .filter(s => !logLecturerId || s.lecturerId === logLecturerId)
+                      .filter(s => !logBatchId || s.batchId === logBatchId)
+                      .filter(s => s.subjectId)
+                      .map(s => [s.subjectId, s])
+                    ).values()].map(s => (
+                      <option key={s.subjectId} value={s.subjectId}>
+                        {s.subjectName || s.subjectCode || s.subjectId}
+                      </option>
                     ))}
                   </select>
                 </div>
 
-                {/* Status dropdown */}
+                {/* STATUS */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', whiteSpace: 'nowrap' }}>Status:</span>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#374151' }}>
+                    Status:
+                  </label>
                   <select
-                    value={filterStatus}
-                    onChange={e => { setFilterStatus(e.target.value); setLogPage(1); }}
-                    style={{ fontSize: '12px', padding: '6px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', color: '#1A202C', cursor: 'pointer', background: 'white' }}
-                  >
+                    value={logStatus}
+                    onChange={e => setLogStatus(e.target.value)}
+                    style={{ padding: '7px 10px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '13px',
+                      background: 'white', minWidth: '140px' }}>
                     <option value="">All Statuses</option>
-                    <option value="conducted">✓ Conducted</option>
-                    <option value="cancelled">✕ Missed / Cancelled</option>
-                    <option value="substituted">⇄ Substituted</option>
+                    <option value="Scheduled">Scheduled</option>
+                    <option value="Conducted">Conducted</option>
+                    <option value="Missed">Missed</option>
+                    <option value="Substituted">Substituted</option>
+                    <option value="Cancelled">Cancelled</option>
                   </select>
                 </div>
+              </div>
 
-                {/* Period quick-select pills */}
-                <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto', flexWrap: 'wrap' }}>
-                  {['This Week', 'This Month', 'This Year', 'Custom Range'].map(p => (
-                    <button
-                      key={p}
-                      onClick={() => { setLogPeriod(p); setLogPage(1); }}
+              {/* Row 2: Date range buttons */}
+              <div style={{ display: 'flex', alignItems: 'center',
+                justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {['week', 'month', 'year', 'custom'].map(range => (
+                    <button key={range}
+                      onClick={() => setLogRange(range)}
                       style={{
-                        padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
-                        border: logPeriod === p ? 'none' : '1px solid #E2E8F0',
-                        background: logPeriod === p ? '#4F46E5' : 'white',
-                        color: logPeriod === p ? 'white' : '#64748B',
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      {p}
+                        padding: '6px 14px', borderRadius: '20px', fontSize: '12px',
+                        fontWeight: 700, cursor: 'pointer', border: 'none',
+                        background: logRange === range ? '#4F46E5' : '#E9ECF0',
+                        color: logRange === range ? 'white' : '#374151'
+                      }}>
+                      {range === 'week' ? 'This Week'
+                        : range === 'month' ? 'This Month'
+                        : range === 'year' ? 'This Year'
+                        : 'Custom Range'}
                     </button>
                   ))}
-                </div>
 
-                {/* Clear filters button */}
-                {(logLecturerFilter !== "All" || filterBatchId || filterSubjectId || filterStatus) && (
+                  {/* Clear filters */}
                   <button
                     onClick={() => {
-                      setLogLecturerFilter("All");
-                      setFilterBatchId("");
-                      setFilterSubjectId("");
-                      setFilterStatus("");
-                      setLogPage(1);
+                      setLogLecturerId(''); setLogBatchId('');
+                      setLogSubjectId(''); setLogStatus('');
+                      setLogRange('month'); setLogCustomStart('');
+                      setLogCustomEnd(''); setLogIncludeUpcoming(false);
                     }}
-                    style={{
-                      padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
-                      border: '1px solid #FCA5A5', background: '#FFF5F5', color: '#DC2626'
-                    }}
-                  >
-                    ✕ Clear Filters
-                  </button>
-                )}
-              </div>
-
-              {/* Custom Range row */}
-              {logPeriod === 'Custom Range' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E3E6EA' }}>
-                  <label style={{ fontSize: '12px', color: '#4A5568' }}>From:</label>
-                  <input type="date" value={logCustomFrom} onChange={e => setLogCustomFrom(e.target.value)} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #CBD5E0', fontSize: '12px' }} />
-                  <label style={{ fontSize: '12px', color: '#4A5568' }}>To:</label>
-                  <input type="date" value={logCustomTo} onChange={e => setLogCustomTo(e.target.value)} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #CBD5E0', fontSize: '12px' }} />
-                  <button onClick={() => setLogPage(1)} style={{ padding: '5px 14px', background: '#2B6CB0', color: '#FFF', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-                    Apply
+                    style={{ padding: '6px 14px', borderRadius: '20px',
+                      fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                      border: '1px solid #FCA5A5', background: '#FFF5F5',
+                      color: '#DC2626' }}>
+                    × Clear Filters
                   </button>
                 </div>
-              )}
 
-              {/* STATS ROW */}
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: '120px', background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#1A202C' }}>{totalScheduled}</div>
-                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>SCHEDULED</div>
-                </div>
-                <div style={{ flex: 1, minWidth: '120px', background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#276749' }}>{totalConducted}</div>
-                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>CONDUCTED</div>
-                </div>
-                <div style={{ flex: 1, minWidth: '120px', background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#C53030' }}>{totalMissed}</div>
-                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>MISSED</div>
-                </div>
-                <div style={{ flex: 1, minWidth: '120px', background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#B7860A' }}>{totalSubstituted}</div>
-                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>SUBSTITUTED</div>
-                </div>
-                <div style={{ flex: 1, minWidth: '120px', background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: attendRateColor }}>{attendRate}%</div>
-                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>ATTEND RATE</div>
-                </div>
-                <div style={{ flex: 1, minWidth: '130px', background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)', border: '1px solid #FDE68A', borderRadius: '10px', padding: '14px 16px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 900, color: '#D97706' }}>{totalExtra}</div>
-                  <div style={{ fontSize: '10px', color: '#92400E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>⚡ EXTRA CLASSES</div>
-                  <div style={{ fontSize: '9px', color: '#B45309', marginTop: '2px' }}>above weekly limit</div>
-                </div>
-              </div>
-
-              {/* TOGGLE FOR UPCOMING */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#4A5568', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
+                {/* Include upcoming toggle */}
+                <label style={{ display: 'flex', alignItems: 'center',
+                  gap: '6px', cursor: 'pointer', fontSize: '12px',
+                  fontWeight: 600, color: '#374151' }}>
+                  <input type="checkbox"
                     checked={logIncludeUpcoming}
-                    onChange={e => { setLogIncludeUpcoming(e.target.checked); setLogPage(1); }}
+                    onChange={e => setLogIncludeUpcoming(e.target.checked)}
                   />
                   Include upcoming
                 </label>
               </div>
 
-              {/* SESSION LOG TABLE */}
-              {paginatedRows.length > 0 ? (
-                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #E3E6EA', borderRadius: '12px' }}>
-                  <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                    <thead>
-                      <tr style={{ background: '#F8FAFC', borderBottom: '1.5px solid #E3E6EA' }}>
-                        <th style={{ padding: '10px 14px', fontSize: '11px', fontWeight: 700, color: '#718096' }}>DATE</th>
-                        <th style={{ padding: '10px 14px', fontSize: '11px', fontWeight: 700, color: '#718096' }}>DAY</th>
-                        <th style={{ padding: '10px 14px', fontSize: '11px', fontWeight: 700, color: '#718096' }}>BATCH</th>
-                        <th style={{ padding: '10px 14px', fontSize: '11px', fontWeight: 700, color: '#718096' }}>SUBJECT</th>
-                        <th style={{ padding: '10px 14px', fontSize: '11px', fontWeight: 700, color: '#718096' }}>TIME</th>
-                        <th style={{ padding: '10px 14px', fontSize: '11px', fontWeight: 700, color: '#718096' }}>CLASSROOM</th>
-                        <th style={{ padding: '10px 14px', fontSize: '11px', fontWeight: 700, color: '#718096' }}>STATUS</th>
-                        <th style={{ padding: '10px 14px', fontSize: '11px', fontWeight: 700, color: '#718096' }}>ATTENDANCE</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paginatedRows.map(r => (
-                        <tr key={r.id} style={{ borderBottom: '1px solid #F0F2F5' }}>
-                          <td style={{ padding: '10px 14px', fontWeight: 600, color: '#1A202C' }}>{r.dateDisplay}</td>
-                          <td style={{ padding: '10px 14px', color: '#4A5568' }}>{r.dayName}</td>
-                          <td style={{ padding: '10px 14px', color: '#4A5568' }}>{r.batchName}</td>
-                          <td style={{ padding: '10px 14px', fontWeight: 600, color: '#4F46E5' }}>{r.subjectName}</td>
-                          <td style={{ padding: '10px 14px', color: '#4A5568' }}>{r.timeDisplay}</td>
-                          <td style={{ padding: '10px 14px', color: '#4A5568' }}>{r.classroomName}</td>
-                          <td style={{ padding: '10px 14px' }}>
-                            <span style={{
-                              padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 700,
-                              background: r.statusStyle.background, color: r.statusStyle.color
-                            }}>
-                              {r.statusText}
-                            </span>
-                            {r.isExtra && (
+              {/* Custom date range inputs */}
+              {logRange === 'custom' && (
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center',
+                  marginTop: '10px' }}>
+                  <input type="date" value={logCustomStart}
+                    onChange={e => setLogCustomStart(e.target.value)}
+                    style={{ padding: '7px 10px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '13px' }}
+                  />
+                  <span style={{ color: '#9CA3AF' }}>→</span>
+                  <input type="date" value={logCustomEnd}
+                    onChange={e => setLogCustomEnd(e.target.value)}
+                    style={{ padding: '7px 10px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '13px' }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* STAT CARDS ROW (6 cards) */}
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap',
+              marginBottom: '20px' }}>
+
+              {/* Scheduled */}
+              <div style={{ background: 'white', border: '1px solid #E3E6EA',
+                borderRadius: '12px', padding: '16px 20px',
+                textAlign: 'center', flex: '1 1 100px' }}>
+                <div style={{ fontSize: '28px', fontWeight: 900, color: '#4F46E5' }}>
+                  {scheduledCount}
+                </div>
+                <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: 700,
+                  textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>
+                  Scheduled
+                </div>
+              </div>
+
+              {/* Conducted */}
+              <div style={{ background: 'white', border: '1px solid #E3E6EA',
+                borderRadius: '12px', padding: '16px 20px',
+                textAlign: 'center', flex: '1 1 100px' }}>
+                <div style={{ fontSize: '28px', fontWeight: 900, color: '#059669' }}>
+                  {conductedCount}
+                </div>
+                <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: 700,
+                  textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>
+                  Conducted
+                </div>
+              </div>
+
+              {/* Missed */}
+              <div style={{ background: 'white', border: '1px solid #E3E6EA',
+                borderRadius: '12px', padding: '16px 20px',
+                textAlign: 'center', flex: '1 1 100px' }}>
+                <div style={{ fontSize: '28px', fontWeight: 900, color: '#DC2626' }}>
+                  {missedCount}
+                </div>
+                <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: 700,
+                  textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>
+                  Missed
+                </div>
+              </div>
+
+              {/* Substituted */}
+              <div style={{ background: 'white', border: '1px solid #E3E6EA',
+                borderRadius: '12px', padding: '16px 20px',
+                textAlign: 'center', flex: '1 1 100px' }}>
+                <div style={{ fontSize: '28px', fontWeight: 900, color: '#7C3AED' }}>
+                  {substitutedCount}
+                </div>
+                <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: 700,
+                  textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>
+                  Substituted
+                </div>
+              </div>
+
+              {/* Attend Rate */}
+              <div style={{ background: 'white', border: '1px solid #E3E6EA',
+                borderRadius: '12px', padding: '16px 20px',
+                textAlign: 'center', flex: '1 1 100px' }}>
+                <div style={{ fontSize: '28px', fontWeight: 900,
+                  color: attendRate >= 80 ? '#059669'
+                    : attendRate >= 60 ? '#D97706' : '#DC2626' }}>
+                  {attendRate}%
+                </div>
+                <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: 700,
+                  textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>
+                  Attend Rate
+                </div>
+              </div>
+
+              {/* Extra Classes */}
+              <div style={{
+                background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
+                border: '1px solid #FDE68A', borderRadius: '12px',
+                padding: '16px 20px', textAlign: 'center', flex: '1 1 100px'
+              }}>
+                <div style={{ fontSize: '28px', fontWeight: 900, color: '#D97706' }}>
+                  {extraCount}
+                </div>
+                <div style={{ fontSize: '11px', color: '#92400E', fontWeight: 700,
+                  textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>
+                  ⚡ Extra Classes
+                </div>
+                <div style={{ fontSize: '10px', color: '#B45309', marginTop: '2px' }}>
+                  above weekly limit
+                </div>
+              </div>
+            </div>
+
+            {/* SESSION TABLE */}
+            {filteredSessions.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '48px 24px',
+                color: '#9CA3AF', fontSize: '14px', fontStyle: 'italic',
+                border: '1px dashed #E3E6EA', borderRadius: '12px' }}>
+                No session logs found for the selected filter and period.
+                <div style={{ fontSize: '12px', marginTop: '8px', color: '#B0B7C3' }}>
+                  Sessions appear here once they are scheduled in the Timetable.
+                </div>
+              </div>
+            ) : (
+              <div style={{ border: '1px solid #E3E6EA', borderRadius: '12px',
+                overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#F8F9FB', borderBottom: '2px solid #E3E6EA' }}>
+                      {['DATE', 'DAY', 'SUBJECT', 'BATCH', 'LECTURER',
+                        'TIME', 'STATUS', 'MARK AS'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left',
+                          fontSize: '10px', fontWeight: 800, color: '#6B7280',
+                          textTransform: 'uppercase', letterSpacing: '0.07em',
+                          whiteSpace: 'nowrap' }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(filteredSessions || []).map((session, idx) => {
+                      const sessionDate = new Date((session.date || '') + 'T12:00:00');
+                      const todayEnd = new Date();
+                      todayEnd.setHours(23, 59, 59, 999);
+                      const isPast = sessionDate <= todayEnd;
+                      const leaveFlag = hasApprovedLeave(session.lecturerId, session.date);
+                      const currentStatus = session.status || 'Scheduled';
+
+                      // Row background based on status
+                      const rowBg = currentStatus === 'Conducted' ? '#F0FDF4'
+                        : currentStatus === 'Missed'      ? '#FFF5F5'
+                        : currentStatus === 'Substituted' ? '#F5F3FF'
+                        : currentStatus === 'Cancelled'   ? '#F9FAFB'
+                        : leaveFlag                        ? '#FFFBEB'
+                        : 'white';
+
+                      return (
+                        <tr key={session.id}
+                          style={{
+                            borderBottom: '1px solid #F1F5F9',
+                            background: idx % 2 === 0 ? rowBg
+                              : rowBg === 'white' ? '#FAFAFA' : rowBg
+                          }}>
+
+                          {/* DATE */}
+                          <td style={{ padding: '10px 12px', fontSize: '13px',
+                            fontWeight: 600, color: '#1A202C', whiteSpace: 'nowrap' }}>
+                            {session.date || '—'}
+                          </td>
+
+                          {/* DAY */}
+                          <td style={{ padding: '10px 12px', fontSize: '12px',
+                            color: '#6B7280', whiteSpace: 'nowrap' }}>
+                            {session.day || '—'}
+                          </td>
+
+                          {/* SUBJECT */}
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ fontSize: '13px', fontWeight: 700,
+                              color: '#1A202C' }}>
+                              {session.subjectName || session.subjectCode || '—'}
+                            </div>
+                            {session.isExtra && (
                               <span style={{
-                                display: 'inline-block',
-                                padding: '2px 8px',
-                                borderRadius: '12px',
-                                background: '#FEF3C7',
-                                border: '1px solid #F59E0B',
-                                color: '#92400E',
-                                fontSize: '10px',
-                                fontWeight: 800,
-                                marginLeft: '6px'
-                              }} title={r.extraNote || 'Extra class above limit'}>
+                                display: 'inline-block', marginTop: '3px',
+                                padding: '2px 7px', borderRadius: '10px',
+                                background: '#FEF3C7', border: '1px solid #F59E0B',
+                                color: '#92400E', fontSize: '10px', fontWeight: 800
+                              }}>
                                 ⚡ EXTRA
                               </span>
                             )}
                           </td>
-                          <td style={{ padding: '10px 14px', fontWeight: 600, color: r.attendanceStr === '—' ? '#A0AEC0' : '#276749' }}>
-                            {r.attendanceStr}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '32px', color: '#A0AEC0', fontStyle: 'italic', background: '#F8FAFC', borderRadius: '10px' }}>
-                  No session logs found for the selected filter and period.
-                </div>
-              )}
 
-              {/* PAGINATION */}
-              {totalPages > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
-                  <span style={{ fontSize: '12px', color: '#718096' }}>
-                    Page {logPage} of {totalPages} ({displayRows.length} sessions)
-                  </span>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      disabled={logPage === 1}
-                      onClick={() => setLogPage(p => Math.max(1, p - 1))}
-                      style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #E3E6EA', background: '#FFF', fontSize: '12px', cursor: logPage === 1 ? 'not-allowed' : 'pointer', opacity: logPage === 1 ? 0.5 : 1 }}
-                    >
-                      Prev
-                    </button>
-                    <button
-                      disabled={logPage === totalPages}
-                      onClick={() => setLogPage(p => Math.min(totalPages, p + 1))}
-                      style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #E3E6EA', background: '#FFF', fontSize: '12px', cursor: logPage === totalPages ? 'not-allowed' : 'pointer', opacity: logPage === totalPages ? 0.5 : 1 }}
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              )}
+                          {/* BATCH */}
+                          <td style={{ padding: '10px 12px', fontSize: '12px',
+                            color: '#374151' }}>
+                            {session.batchName || '—'}
+                          </td>
+
+                          {/* LECTURER */}
+                          <td style={{ padding: '10px 12px', fontSize: '12px',
+                            color: '#374151', whiteSpace: 'nowrap' }}>
+                            {session.lecturerName || '—'}
+                            {leaveFlag && (
+                              <div style={{ fontSize: '10px', color: '#D97706',
+                                fontWeight: 700, marginTop: '2px' }}>
+                                ⚠ Leave Approved
+                              </div>
+                            )}
+                          </td>
+
+                          {/* TIME */}
+                          <td style={{ padding: '10px 12px', fontSize: '12px',
+                            color: '#374151', whiteSpace: 'nowrap' }}>
+                            {session.startTime && session.endTime
+                              ? `${session.startTime}–${session.endTime}`
+                              : '—'}
+                          </td>
+
+                          {/* STATUS chip */}
+                          <td style={{ padding: '10px 12px' }}>
+                            <span style={{
+                              display: 'inline-block', padding: '4px 10px',
+                              borderRadius: '12px', fontSize: '11px', fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                              background:
+                                currentStatus === 'Conducted'   ? '#D1FAE5'
+                                : currentStatus === 'Missed'    ? '#FEE2E2'
+                                : currentStatus === 'Substituted' ? '#EDE9FE'
+                                : currentStatus === 'Cancelled' ? '#F3F4F6'
+                                : leaveFlag                     ? '#FEF3C7'
+                                : '#EEF2FF',
+                              color:
+                                currentStatus === 'Conducted'   ? '#065F46'
+                                : currentStatus === 'Missed'    ? '#991B1B'
+                                : currentStatus === 'Substituted' ? '#5B21B6'
+                                : currentStatus === 'Cancelled' ? '#6B7280'
+                                : leaveFlag                     ? '#92400E'
+                                : '#3730A3'
+                            }}>
+                              {currentStatus === 'Scheduled' && leaveFlag
+                                ? '⚠ Pending'
+                                : currentStatus === 'Conducted'   ? '✓ Conducted'
+                                : currentStatus === 'Missed'      ? '✗ Missed'
+                                : currentStatus === 'Substituted' ? '↔ Substituted'
+                                : currentStatus === 'Cancelled'   ? '— Cancelled'
+                                : '● Scheduled'}
+                            </span>
+                          </td>
+
+                          {/* MARK AS buttons — only for past sessions */}
+                          <td style={{ padding: '10px 12px' }}>
+                            {isPast ? (
+                              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                <button
+                                  onClick={() => markSessionStatus(session.id, 'Conducted')}
+                                  style={{
+                                    padding: '4px 9px', borderRadius: '6px', fontSize: '11px',
+                                    fontWeight: 700, cursor: 'pointer', border: 'none',
+                                    background: currentStatus === 'Conducted'
+                                      ? '#059669' : '#D1FAE5',
+                                    color: currentStatus === 'Conducted' ? 'white' : '#065F46'
+                                  }}>
+                                  ✓
+                                </button>
+                                <button
+                                  onClick={() => markSessionStatus(session.id, 'Missed')}
+                                  style={{
+                                    padding: '4px 9px', borderRadius: '6px', fontSize: '11px',
+                                    fontWeight: 700, cursor: 'pointer', border: 'none',
+                                    background: currentStatus === 'Missed'
+                                      ? '#DC2626' : '#FEE2E2',
+                                    color: currentStatus === 'Missed' ? 'white' : '#991B1B'
+                                  }}>
+                                  ✗
+                                </button>
+                                <button
+                                  onClick={() => markSessionStatus(session.id, 'Substituted')}
+                                  style={{
+                                    padding: '4px 9px', borderRadius: '6px', fontSize: '11px',
+                                    fontWeight: 700, cursor: 'pointer', border: 'none',
+                                    background: currentStatus === 'Substituted'
+                                      ? '#7C3AED' : '#EDE9FE',
+                                    color: currentStatus === 'Substituted' ? 'white' : '#5B21B6'
+                                  }}>
+                                  ↔
+                                </button>
+                                <button
+                                  onClick={() => markSessionStatus(session.id, 'Cancelled')}
+                                  style={{
+                                    padding: '4px 9px', borderRadius: '6px', fontSize: '11px',
+                                    fontWeight: 700, cursor: 'pointer', border: 'none',
+                                    background: currentStatus === 'Cancelled'
+                                      ? '#6B7280' : '#F3F4F6',
+                                    color: currentStatus === 'Cancelled' ? 'white' : '#374151'
+                                  }}>
+                                  —
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: '#9CA3AF',
+                                fontStyle: 'italic' }}>upcoming</span>
+                            )}
+                          </td>
+
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* MARK AS BUTTON LEGEND */}
+            <div style={{ marginTop: '12px', display: 'flex', gap: '16px',
+              flexWrap: 'wrap', fontSize: '11px', color: '#6B7280' }}>
+              <span><strong style={{ color: '#059669' }}>✓</strong> = Conducted</span>
+              <span><strong style={{ color: '#DC2626' }}>✗</strong> = Missed</span>
+              <span><strong style={{ color: '#7C3AED' }}>↔</strong> = Substituted</span>
+              <span><strong style={{ color: '#6B7280' }}>—</strong> = Cancelled</span>
+              <span style={{ color: '#D97706' }}>⚠ Leave Approved = lecturer had approved leave on this date</span>
+              <span style={{ color: '#92400E' }}>⚡ EXTRA = session exceeded weekly class limit</span>
             </div>
           </div>
         );
