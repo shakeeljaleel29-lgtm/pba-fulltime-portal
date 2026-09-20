@@ -1014,7 +1014,7 @@ export const ExamManagementView = ({ isMobile }) => {
             Schedule term tests, manage mark sheets, and generate official class ranking reports.
           </p>
         </div>
-        {(currentUser.role === "Admin" || currentUser.role === "Lecturer") && (
+        {activeTab === "schedule" && (currentUser.role === "Admin" || currentUser.role === "Lecturer") && (
           <button
             onClick={handleOpenAddExam}
             style={{
