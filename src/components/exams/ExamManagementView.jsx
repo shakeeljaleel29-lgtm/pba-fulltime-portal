@@ -23,6 +23,24 @@ import { printExamResultsPDF } from "../../utils/pdfGenerator";
 
 import { T, theme, type as t } from "../../theme";
 
+const safeLS = (key, fallback = []) => {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch (e) {
+    console.error(`Failed to read ${key} from localStorage:`, e);
+    return fallback;
+  }
+};
+
+const saveLS = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.error(`Failed to write ${key} to localStorage:`, e);
+  }
+};
+
 export const ExamManagementView = ({ isMobile }) => {
   const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
   const { data, setData, addExam, updateExamMarks, currentUser, filterByBranch, effectiveBranch, showToast, exportToCSV } = useApp();
@@ -55,68 +73,111 @@ export const ExamManagementView = ({ isMobile }) => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importRows, setImportRows] = useState([]);
 
-  // Form State for Schedule Exam
-  const [examForm, setExamForm] = useState({
-    subjectId: "",
-    name: "Term Test 1",
-    type: "Term Test",
-    batch: "",
-    date: new Date().toISOString().split("T")[0],
-    time: "09:00 – 11:00 AM",
-    totalMarks: 100,
-    passMark: 50,
-    classroom: "Hall A",
-    invigilator: "Mr. Gamini Silva",
-    notes: ""
+  // Local state initialized with lazy initializers from localStorage
+  const [batches, setBatches] = useState(() => safeLS('pba_batches', []));
+  const [subjects, setSubjects] = useState(() => safeLS('pba_subjects', []));
+  const [examSchedule, setExamSchedule] = useState(() => safeLS('pba_exam_schedule', []));
+
+  // Refresh on mount so newly created batches appear immediately
+  useEffect(() => {
+    setBatches(safeLS('pba_batches', []));
+    setSubjects(safeLS('pba_subjects', []));
+    setExamSchedule(safeLS('pba_exam_schedule', []));
+  }, []);
+
+  const emptySubjectRow = () => ({
+    subjectId: '', subjectCode: '', subjectName: '',
+    date: '', startTime: '09:00', endTime: '11:00',
+    totalMarks: 100, passMarks: 50, venue: '', notes: ''
   });
+
+  const [scheduleForm, setScheduleForm] = useState({
+    examSessionName: '',
+    examType: 'Term Test',
+    batchId: '',
+    batchName: '',
+    sessionStartDate: '',
+    sessionEndDate: '',
+    subjectRows: [emptySubjectRow()]
+  });
+
+  // Subjects available for the selected batch
+  const batchSubjectOptions = (() => {
+    if (!scheduleForm.batchId) return [];
+    const batch = (batches || []).find(b => b.id === scheduleForm.batchId);
+    return (batch?.subjects || []).map(bs => ({
+      id: bs.subjectId || bs.id,
+      name: bs.subjectName || bs.name,
+      code: bs.subjectCode || bs.code || ''
+    }));
+  })();
+
+  // Open Schedule Exam session modal
+  const openScheduleModal = () => {
+    setBatches(safeLS('pba_batches', []));    // always refresh
+    setSubjects(safeLS('pba_subjects', []));
+    setScheduleForm({
+      examSessionName: '', examType: 'Term Test',
+      batchId: '', batchName: '',
+      sessionStartDate: '', sessionEndDate: '',
+      subjectRows: [emptySubjectRow()]
+    });
+    setShowAddExamModal(true);
+  };
+
+  const handleOpenAddExam = () => {
+    openScheduleModal();
+  };
 
   // Local Mark Entry State: { [studentId]: { marksObtained: number|null, isAbsent: boolean, remarks: string } }
   const [markEntryState, setMarkEntryState] = useState({});
 
-  const subjects = data.subjects || [];
-  const batches = data.batches || [];
   const students = data.students || [];
 
   // Load / initialize pba_marks from localStorage if present
   const [allMarks, setAllMarks] = useState(() => {
-    try {
-      const saved = localStorage.getItem("pba_marks");
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error("Failed to parse pba_marks:", e);
-    }
-    return [];
+    return safeLS("pba_marks", []);
   });
 
   // Keep localStorage synced for pba_marks
   useEffect(() => {
-    try {
-      localStorage.setItem("pba_marks", JSON.stringify(allMarks));
-    } catch (e) {
-      console.error("Failed saving pba_marks to localStorage:", e);
-    }
+    saveLS("pba_marks", allMarks);
   }, [allMarks]);
+
+  // Combined list of exams: pba_exam_schedule + data.exams fallback
+  const combinedExams = (() => {
+    const fromLS = (examSchedule && examSchedule.length > 0) ? examSchedule : safeLS('pba_exam_schedule', []);
+    if (fromLS && fromLS.length > 0) {
+      const existingIds = new Set(fromLS.map(e => e.id));
+      const extra = (data.exams || []).filter(e => !existingIds.has(e.id));
+      return [...fromLS, ...extra];
+    }
+    return data.exams || [];
+  })();
 
   // Default selection initialization
   useEffect(() => {
-    if (data.exams && data.exams.length > 0 && !selectedExamId) {
-      setSelectedExamId(data.exams[0].id);
+    if (combinedExams && combinedExams.length > 0 && !selectedExamId) {
+      setSelectedExamId(combinedExams[0].id);
     }
-    if (subjects.length > 0 && !selectedSubjectId) {
-      setSelectedSubjectId(subjects[0].id);
+    const allSubjs = (subjects && subjects.length > 0) ? subjects : (data.subjects || []);
+    if (allSubjs.length > 0 && !selectedSubjectId) {
+      setSelectedSubjectId(allSubjs[0].id);
     }
     if (students.length > 0 && !selectedBatchName) {
       setSelectedBatchName(students[0].batch || "Batch 2024-A (A/L Commerce)");
     }
-  }, [data.exams, subjects, students]);
+  }, [combinedExams, subjects, students]);
 
   // When selectedExamId changes in Mark Entry tab, populate markEntryState from allMarks or legacy exam.results
   useEffect(() => {
     if (!selectedExamId) return;
-    const targetExam = data.exams.find((e) => e.id === selectedExamId);
+    const targetExam = combinedExams.find((e) => e.id === selectedExamId);
     if (!targetExam) return;
 
-    const batchStudents = students.filter((s) => s.batch === targetExam.batch || targetExam.batch === "All");
+    const targetBatch = targetExam.batchName || targetExam.batch || "All";
+    const targetBatchObj = (batches || []).find(b => b.id === targetExam.batchId || b.name === targetBatch);
+    const batchStudents = students.filter((s) => s.batch === targetBatch || (targetBatchObj && (s.batchId === targetBatchObj.id || s.batch === targetBatchObj.name)) || targetBatch === "All");
     const existingExamMarks = allMarks.filter((m) => m.examId === targetExam.id);
 
     const initial = {};
@@ -148,85 +209,59 @@ export const ExamManagementView = ({ isMobile }) => {
     });
 
     setMarkEntryState(initial);
-  }, [selectedExamId, allMarks, data.exams, students]);
+  }, [selectedExamId, allMarks, combinedExams, students, batches]);
 
-  // Calculate auto exam number helper for a subject + batch
-  const getNextExamNumber = (subjId, batchName) => {
-    const matching = (data.exams || []).filter(
-      (e) => (e.subjectId === subjId || e.subject === subjects.find((s) => s.id === subjId)?.name) && e.batch === batchName
-    );
-    return matching.length + 1;
-  };
+  // Save new exam session
+  const handleSaveExamSession = () => {
+    const { examSessionName, examType, batchId, batchName,
+            sessionStartDate, sessionEndDate, subjectRows } = scheduleForm;
 
-  // Open Schedule Exam modal
-  const handleOpenAddExam = () => {
-    setEditingExam(null);
-    const defaultSubj = subjects[0] || { id: "subj-001", name: "Biology", code: "BIO" };
-    const defaultBatch = batches[0]?.name || "Batch 2024-A (A/L Commerce)";
-    const autoNum = getNextExamNumber(defaultSubj.id, defaultBatch);
-
-    setExamForm({
-      subjectId: defaultSubj.id,
-      name: `Exam #${autoNum} - ${defaultSubj.name}`,
-      type: "Term Test",
-      batch: defaultBatch,
-      date: new Date().toISOString().split("T")[0],
-      time: "09:00 – 11:00 AM",
-      totalMarks: 100,
-      passMark: 50,
-      classroom: "Hall A",
-      invigilator: "Mr. Gamini Silva",
-      notes: ""
-    });
-    setShowAddExamModal(true);
-  };
-
-  // Save new or updated exam
-  const handleSaveExam = (e) => {
-    e.preventDefault();
-    const subjObj = subjects.find((s) => s.id === examForm.subjectId) || { code: "GEN", name: examForm.subject || "General" };
-    const autoExamNum = getNextExamNumber(examForm.subjectId, examForm.batch);
-
-    if (editingExam) {
-      const updatedList = (data.exams || []).map((ex) =>
-        ex.id === editingExam.id
-          ? {
-              ...ex,
-              ...examForm,
-              subject: subjObj.name,
-              subjectCode: subjObj.code,
-              examNumber: ex.examNumber || autoExamNum
-            }
-          : ex
-      );
-      setData((prev) => ({ ...prev, exams: updatedList }));
-      showToast("Exam updated successfully.", "success");
-    } else {
-      const newExamObj = {
-        id: "ex-" + Date.now(),
-        subjectId: examForm.subjectId,
-        subjectCode: subjObj.code,
-        subject: subjObj.name,
-        name: examForm.name,
-        type: examForm.type,
-        batch: examForm.batch,
-        date: examForm.date,
-        time: examForm.time,
-        totalMarks: Number(examForm.totalMarks) || 100,
-        passMark: Number(examForm.passMark) || 50,
-        classroom: examForm.classroom,
-        invigilator: examForm.invigilator,
-        notes: examForm.notes,
-        examNumber: autoExamNum,
-        status: "draft",
-        publishedAt: null,
-        branch: effectiveBranch === "All" ? "Kohuwala" : effectiveBranch,
-        results: []
-      };
-      addExam(newExamObj);
-      showToast(`Exam "${newExamObj.name}" scheduled.`, "success");
+    // Validate
+    if (!examSessionName.trim()) {
+      alert('Please enter an Exam Session Name.'); return;
     }
+    if (!batchId) {
+      alert('Please select a Target Batch.'); return;
+    }
+    const validRows = (subjectRows || []).filter(r => r.subjectId && r.date);
+    if (validRows.length === 0) {
+      alert('Please add at least one subject with a date.'); return;
+    }
+
+    const examSessionId = `examSession_${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const newRecords = validRows.map((row, idx) => ({
+      id:              `examSched_${Date.now()}_${idx}`,
+      examSessionId,
+      examSessionName: examSessionName.trim(),
+      examType,
+      batchId,
+      batchName,
+      sessionStartDate,
+      sessionEndDate,
+      subjectId:       row.subjectId,
+      subjectName:     row.subjectName,
+      subjectCode:     row.subjectCode || '',
+      date:            row.date,
+      startTime:       row.startTime,
+      endTime:         row.endTime,
+      totalMarks:      row.totalMarks || 100,
+      passMarks:       row.passMarks  || 50,
+      venue:           row.venue || '',
+      notes:           row.notes || '',
+      status:          'scheduled',
+      createdAt:       now
+    }));
+
+    const existing = safeLS('pba_exam_schedule', []);
+    const updated = [...existing, ...newRecords];
+    saveLS('pba_exam_schedule', updated);
+    setExamSchedule(updated);
     setShowAddExamModal(false);
+    if (typeof showToast === 'function') {
+      showToast(`Exam session "${examSessionName.trim()}" scheduled with ${validRows.length} subject(s).`, "success");
+    }
   };
 
   // Publish exam results
@@ -441,24 +476,57 @@ export const ExamManagementView = ({ isMobile }) => {
     showToast("Imported marks updated in editor. Click 'Save All Marks' to commit.", "success");
   };
 
-  // Filtered exams list for Schedule Tab
-  const filteredExams = (data.exams || []).filter((ex) => {
-    if (filterSubject !== "All" && ex.subjectId !== filterSubject && ex.subject !== subjects.find((s) => s.id === filterSubject)?.name) {
-      return false;
+  // Group pba_exam_schedule records by examSessionId
+  const sessionGroups = (() => {
+    const groups = {};
+    (combinedExams || []).forEach(record => {
+      const key = record.examSessionId || `${record.examSessionName || record.examName || record.name || 'Session'}_${record.batchId || record.batch || 'Batch'}`;
+      if (!groups[key]) {
+        groups[key] = {
+          examSessionId:   record.examSessionId || key,
+          examSessionName: record.examSessionName || record.examName || record.name || '—',
+          examType:        record.examType || record.type || '',
+          batchId:         record.batchId || record.batch,
+          batchName:       record.batchName || record.batch || '—',
+          sessionStartDate: record.sessionStartDate || record.date || '',
+          sessionEndDate:   record.sessionEndDate || record.date || '',
+          subjects: []
+        };
+      }
+      groups[key].subjects.push(record);
+    });
+    // Sort subjects by date within each group
+    Object.values(groups).forEach(g => {
+      g.subjects.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    });
+    return Object.values(groups).sort((a, b) =>
+      (b.subjects[0]?.createdAt || '').localeCompare(a.subjects[0]?.createdAt || '')
+    );
+  })();
+
+  const filteredSessionGroups = sessionGroups.filter(group => {
+    if (filterType !== 'All' && group.examType !== filterType) return false;
+    if (filterBatch !== 'All') {
+      const matchesBatch = group.batchId === filterBatch || group.batchName === filterBatch;
+      if (!matchesBatch) return false;
     }
-    if (filterBatch !== "All" && ex.batch !== filterBatch) return false;
-    if (filterType !== "All" && ex.type !== filterType) return false;
-    if (filterStatus !== "All" && ex.status !== filterStatus.toLowerCase()) return false;
+    if (filterSubject !== 'All') {
+      const hasSubject = group.subjects.some(s => s.subjectId === filterSubject || s.subjectName === filterSubject || s.subjectCode === filterSubject);
+      if (!hasSubject) return false;
+    }
     return true;
   });
 
-  // Group filtered exams by subject
-  const groupedExamsBySubject = {};
-  filteredExams.forEach((ex) => {
-    const subjName = ex.subject || "General";
-    if (!groupedExamsBySubject[subjName]) groupedExamsBySubject[subjName] = [];
-    groupedExamsBySubject[subjName].push(ex);
-  });
+  const handleEnterResults = (group) => {
+    const firstSubj = group.subjects?.[0];
+    if (firstSubj) {
+      setSelectedExamId(firstSubj.id);
+    }
+    if (group.batchName) {
+      setSelectedBatchName(group.batchName);
+    }
+    setActiveTab("mark-entry");
+  };
 
   // Selected Exam for Mark Entry & Results Tabs
   const currentSelectedExam = (data.exams || []).find((e) => e.id === selectedExamId) || data.exams[0];
@@ -749,7 +817,7 @@ export const ExamManagementView = ({ isMobile }) => {
               }}
             >
               <option value="All">All Subjects</option>
-              {subjects.map((s) => (<option key={s.id} value={s.id}>{s.code} — {s.name}</option>))}
+              {((subjects && subjects.length > 0 ? subjects : data.subjects) || []).map((s) => (<option key={s.id} value={s.id}>{s.code ? `${s.code} — ` : ''}{s.name}</option>))}
             </select>
 
             <select
@@ -760,8 +828,8 @@ export const ExamManagementView = ({ isMobile }) => {
               }}
             >
               <option value="All">All Batches</option>
-              {Array.from(new Set(students.map((s) => s.batch).filter(Boolean))).map((bName) => (
-                <option key={bName} value={bName}>{bName}</option>
+              {(batches || []).map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </select>
 
@@ -775,197 +843,121 @@ export const ExamManagementView = ({ isMobile }) => {
               <option value="All">All Types</option>
               <option value="Term Test">Term Test</option>
               <option value="Mock Exam">Mock Exam</option>
-              <option value="Assignment">Assignment</option>
+              <option value="Trial Exam">Trial Exam</option>
+              <option value="Assessment">Assessment</option>
+              <option value="Past Paper">Past Paper Practice</option>
               <option value="Final Exam">Final Exam</option>
-            </select>
-
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              style={{
-                padding: "9px 36px 9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', sans-serif", appearance: "none", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", cursor: "pointer"
-              }}
-            >
-              <option value="All">All Statuses</option>
-              <option value="Draft">Draft</option>
-              <option value="Published">Published</option>
             </select>
           </div>
 
-          {/* EXAM LIST GROUPED BY SUBJECT */}
-          {Object.keys(groupedExamsBySubject).map((subjName) => {
-            const subjObj = subjects.find((s) => s.name === subjName || s.code === subjName) || { code: subjName.substring(0, 3).toUpperCase(), name: subjName, color: "#2B6CB0" };
-            const examsInSubj = groupedExamsBySubject[subjName];
-
-            return (
-              <div key={subjName} style={{ marginBottom: "20px" }}>
-                {/* Subject Group Header */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', marginTop: '16px' }}>
-                  <span style={{ background: (subjObj.color || '#2B6CB0') + '20', color: subjObj.color || '#2B6CB0', fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px' }}>
-                    {subjObj.code}
-                  </span>
-                  <span style={{ fontFamily: "'Sora',sans-serif", fontSize: '14px', fontWeight: 700, color: '#1A202C' }}>
-                    {subjObj.name}
-                  </span>
-                  <span style={{ fontSize: '11px', color: '#718096' }}>
-                    {examsInSubj.length} exam{examsInSubj.length !== 1 ? 's' : ''}
-                  </span>
+          {/* SESSION GROUPS */}
+          {filteredSessionGroups.map(group => (
+            <div key={group.examSessionId} style={{
+              background: 'white', borderRadius: '12px',
+              border: '1px solid #E2E8F0', marginBottom: '16px',
+              overflow: 'hidden',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
+            }}>
+              {/* Card header */}
+              <div style={{
+                padding: '14px 18px',
+                background: 'linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 100%)',
+                borderBottom: '1px solid #E2E8F0',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'
+              }}>
+                <div>
+                  <div style={{ fontSize: '16px', fontWeight: 800, color: '#1A202C', marginBottom: '4px' }}>
+                    📋 {group.examSessionName}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#6B7280', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                    <span>🎓 {group.batchName}</span>
+                    {(group.sessionStartDate && group.sessionEndDate) && (
+                      <span>📅 {new Date(group.sessionStartDate + 'T12:00:00').toLocaleDateString('en-GB',
+                        { day: 'numeric', month: 'short' })} –
+                        {new Date(group.sessionEndDate + 'T12:00:00').toLocaleDateString('en-GB',
+                        { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </span>
+                    )}
+                    <span>📚 {group.subjects.length} subject{group.subjects.length !== 1 ? 's' : ''}</span>
+                  </div>
                 </div>
-
-                {/* Exam Cards */}
-                {examsInSubj.map((ex) => {
-                  const isDraft = ex.status !== "published";
-                  const hasMarksEntered = allMarks.some((m) => m.examId === ex.id) || (ex.results && ex.results.length > 0);
-
-                  return (
-                    <div
-                      key={ex.id}
-                      style={{
-                        background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '10px',
-                        padding: '14px 18px', marginBottom: '8px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
-                        flexWrap: 'wrap',
-                        gap: '12px'
-                      }}
-                    >
-                      {/* Left info */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                        <span style={{ background: '#EBF4FF', color: '#2B6CB0', fontSize: '11px', fontWeight: 800, padding: '4px 10px', borderRadius: '20px' }}>
-                          #{ex.examNumber || 1}
-                        </span>
-
-                        <div>
-                          <div style={{ fontSize: '14px', fontWeight: 700, color: '#1A202C' }}>
-                            {ex.name}
-                          </div>
-                          <div style={{ fontSize: '12px', color: '#718096', marginTop: '2px' }}>
-                            📅 {ex.date} | 👥 {ex.batch}
-                          </div>
-                        </div>
-
-                        <div style={{ borderLeft: '1px solid #E3E6EA', paddingLeft: '12px', fontSize: '12px', color: '#4A5568' }}>
-                          <div>/ {ex.totalMarks || 100} marks</div>
-                          <div style={{ fontSize: '11px', color: '#718096' }}>Pass: {ex.passMark || 50}</div>
-                        </div>
-                      </div>
-
-                      {/* Right actions */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span
-                          style={{
-                            padding: '3px 10px',
-                            borderRadius: '6px',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            background: isDraft ? '#F7FAFC' : '#F0FFF4',
-                            color: isDraft ? '#718096' : '#2F855A',
-                            border: isDraft ? '1px solid #E2E8F0' : '1px solid #9AE6B4'
-                          }}
-                        >
-                          {isDraft ? 'DRAFT' : 'PUBLISHED'}
-                        </span>
-
-                        {isDraft && (
-                          <button
-                            onClick={() => {
-                              setSelectedExamId(ex.id);
-                              setActiveTab("mark-entry");
-                            }}
-                            style={{
-                              background: 'linear-gradient(135deg, #2B6CB0, #1A4A8A)',
-                              color: '#FFFFFF',
-                              border: 'none',
-                              borderRadius: '7px',
-                              padding: '6px 14px',
-                              fontSize: '12px',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              boxShadow: '0 2px 6px rgba(43,108,176,0.20)'
-                            }}
-                          >
-                            Enter Marks
-                          </button>
-                        )}
-
-                        <button
-                          onClick={() => {
-                            setSelectedExamId(ex.id);
-                            setActiveTab("results");
-                          }}
-                          style={{
-                            background: '#FFFFFF',
-                            color: '#4A5568',
-                            border: '1px solid #E3E6EA',
-                            borderRadius: '7px',
-                            padding: '6px 12px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          View Results
-                        </button>
-
-                        {isDraft && hasMarksEntered && (
-                          <button
-                            onClick={() => handlePublishResults(ex)}
-                            style={{
-                              background: '#2F855A',
-                              color: '#FFFFFF',
-                              border: 'none',
-                              borderRadius: '7px',
-                              padding: '6px 14px',
-                              fontSize: '12px',
-                              fontWeight: 700,
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Publish Results
-                          </button>
-                        )}
-
-                        <button
-                          onClick={() => {
-                            setEditingExam(ex);
-                            setExamForm({
-                              subjectId: ex.subjectId || subjects[0]?.id || "",
-                              name: ex.name,
-                              type: ex.type,
-                              batch: ex.batch,
-                              date: ex.date,
-                              time: ex.time || "09:00 AM",
-                              totalMarks: ex.totalMarks || 100,
-                              passMark: ex.passMark || 50,
-                              classroom: ex.classroom || "",
-                              invigilator: ex.invigilator || "",
-                              notes: ex.notes || ""
-                            });
-                            setShowAddExamModal(true);
-                          }}
-                          style={{
-                            background: '#FFFFFF',
-                            color: '#718096',
-                            border: '1px solid #E3E6EA',
-                            borderRadius: '7px',
-                            padding: '6px',
-                            cursor: 'pointer'
-                          }}
-                          title="Edit Exam"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+                  {group.examType && (
+                    <span style={{
+                      padding: '4px 10px', borderRadius: '20px',
+                      background: '#4F46E5', color: 'white',
+                      fontSize: '11px', fontWeight: 700
+                    }}>
+                      {group.examType}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleEnterResults(group)}
+                    style={{
+                      padding: '6px 14px', borderRadius: '8px',
+                      border: 'none', background: '#059669',
+                      color: 'white', fontSize: '12px', fontWeight: 700, cursor: 'pointer'
+                    }}>
+                    Enter Results
+                  </button>
+                </div>
               </div>
-            );
-          })}
 
-          {filteredExams.length === 0 && (
-            <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', padding: '36px', textAlign: 'center', color: '#A0AEC0', fontSize: '13px' }}>
-              No scheduled examinations found matching the selected filters.
+              {/* Subject rows */}
+              <div style={{ padding: '4px 0' }}>
+                {group.subjects.map((subj, i) => (
+                  <div key={subj.id} style={{
+                    display: 'grid',
+                    gridTemplateColumns: '2fr 1.5fr 1.5fr 1fr 1fr 0.8fr',
+                    gap: '8px',
+                    padding: '10px 18px',
+                    borderBottom: i < group.subjects.length - 1 ? '1px solid #F1F5F9' : 'none',
+                    alignItems: 'center'
+                  }}>
+                    <div style={{ fontWeight: 700, color: '#1A202C', fontSize: '13px' }}>
+                      {subj.subjectCode ? `${subj.subjectCode} — ` : ''}{subj.subjectName || subj.subject || subj.name}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#4B5563' }}>
+                      {subj.date
+                        ? new Date(subj.date + 'T12:00:00').toLocaleDateString('en-GB',
+                            { weekday: 'short', day: 'numeric', month: 'short' })
+                        : '—'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#4B5563' }}>
+                      {subj.startTime || subj.time || '—'}{subj.endTime ? ` – ${subj.endTime}` : ''}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#4B5563' }}>
+                      {subj.venue || subj.classroom || '—'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#4B5563' }}>
+                      {subj.totalMarks} / {subj.passMarks || subj.passMark} pass
+                    </div>
+                    <div>
+                      <span style={{
+                        padding: '3px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: 700,
+                        background: (subj.status || '') === 'results_entered' ? '#D1FAE5' : '#FEF3C7',
+                        color: (subj.status || '') === 'results_entered' ? '#065F46' : '#92400E'
+                      }}>
+                        {(subj.status || '') === 'results_entered' ? '✓ Done' : '⏳ Pending'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {filteredSessionGroups.length === 0 && (
+            <div style={{
+              textAlign: 'center', padding: '60px 20px', color: '#9CA3AF'
+            }}>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>📋</div>
+              <div style={{ fontSize: '16px', fontWeight: 700, marginBottom: '6px' }}>
+                No exam sessions scheduled yet
+              </div>
+              <div style={{ fontSize: '13px' }}>
+                Click "Schedule New Exam" to create your first exam session.
+              </div>
             </div>
           )}
         </div>
@@ -1965,165 +1957,378 @@ export const ExamManagementView = ({ isMobile }) => {
 
       {/* SCHEDULE EXAM MODAL */}
       {showAddExamModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "520px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
-            <button
-              onClick={() => setShowAddExamModal(false)}
-              style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}
-            >
-              ×
-            </button>
-            <h3 style={{ fontFamily: "'Sora',sans-serif", fontSize: "18px", fontWeight: 700, color: "#1A202C", marginBottom: "16px" }}>
-              {editingExam ? "Edit Examination" : "Schedule New Examination"}
-            </h3>
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: '20px'
+        }}>
+          <div style={{
+            background: 'white', borderRadius: '16px', width: '100%',
+            maxWidth: '760px', maxHeight: '90vh', overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
+          }}>
 
-            <form onSubmit={handleSaveExam}>
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Select Subject</label>
-                <select
-                  value={examForm.subjectId}
-                  onChange={(e) => {
-                    const sid = e.target.value;
-                    const subjObj = subjects.find((s) => s.id === sid);
-                    const autoNum = getNextExamNumber(sid, examForm.batch);
-                    setExamForm({
-                      ...examForm,
-                      subjectId: sid,
-                      name: `Exam #${autoNum} - ${subjObj ? subjObj.name : ""}`
-                    });
-                  }}
-                  style={{
-                    width: "100%", padding: "9px 36px 9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', sans-serif", appearance: "none", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", cursor: "pointer"
-                  }}
-                >
-                  {subjects.map((s) => (<option key={s.id} value={s.id}>{s.code} — {s.name}</option>))}
-                </select>
+            {/* Header */}
+            <div style={{
+              padding: '20px 24px', borderBottom: '1px solid #E2E8F0',
+              background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
+              borderRadius: '16px 16px 0 0',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+            }}>
+              <div>
+                <h2 style={{ color: 'white', fontSize: '18px', fontWeight: 800, margin: 0 }}>
+                  Schedule Exam Session
+                </h2>
+                <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '12px', margin: '4px 0 0' }}>
+                  Create a session for one batch — add each subject with its date & time
+                </p>
+              </div>
+              <button onClick={() => setShowAddExamModal(false)}
+                style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white',
+                  width: '32px', height: '32px', borderRadius: '8px', fontSize: '18px',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                ×
+              </button>
+            </div>
+
+            <div style={{ padding: '24px' }}>
+
+              {/* ── SECTION A: Session Details ── */}
+              <div style={{
+                background: '#F8FAFC', borderRadius: '12px', padding: '16px',
+                border: '1px solid #E2E8F0', marginBottom: '20px'
+              }}>
+                <h3 style={{ fontSize: '13px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 14px' }}>
+                  Session Details
+                </h3>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+
+                  {/* Exam Session Name */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280',
+                      textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block',
+                      marginBottom: '5px' }}>Exam Session Name *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. First Term Exam 2026, Mock Exam 1..."
+                      value={scheduleForm.examSessionName}
+                      onChange={e => setScheduleForm(p => ({ ...p, examSessionName: e.target.value }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '14px', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  {/* Exam Type */}
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280',
+                      textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block',
+                      marginBottom: '5px' }}>Exam Type *</label>
+                    <select
+                      value={scheduleForm.examType}
+                      onChange={e => setScheduleForm(p => ({ ...p, examType: e.target.value }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '14px', background: 'white' }}>
+                      <option value="Term Test">Term Test</option>
+                      <option value="Mock Exam">Mock Exam</option>
+                      <option value="Trial Exam">Trial Exam</option>
+                      <option value="Assessment">Assessment</option>
+                      <option value="Past Paper">Past Paper Practice</option>
+                      <option value="Final Exam">Final Exam</option>
+                    </select>
+                  </div>
+
+                  {/* Target Batch — reads from pba_batches */}
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280',
+                      textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block',
+                      marginBottom: '5px' }}>Target Batch *</label>
+                    <select
+                      value={scheduleForm.batchId}
+                      onChange={e => {
+                        const b = (batches || []).find(b => b.id === e.target.value);
+                        setScheduleForm(p => ({
+                          ...p,
+                          batchId: e.target.value,
+                          batchName: b?.name || '',
+                          subjectRows: [emptySubjectRow()]  // reset subjects when batch changes
+                        }));
+                      }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '14px', background: 'white' }}>
+                      <option value="">— Select Batch —</option>
+                      {(batches || []).map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                    {(batches || []).length === 0 && (
+                      <p style={{ fontSize: '11px', color: '#D97706', marginTop: '4px', fontWeight: 600 }}>
+                        ⚠ No batches found. Create batches in General Admin → Batch Manager first.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Session Start Date */}
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280',
+                      textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block',
+                      marginBottom: '5px' }}>Session Window Start</label>
+                    <input
+                      type="date"
+                      value={scheduleForm.sessionStartDate}
+                      onChange={e => setScheduleForm(p => ({ ...p, sessionStartDate: e.target.value }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '14px', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  {/* Session End Date */}
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280',
+                      textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block',
+                      marginBottom: '5px' }}>Session Window End</label>
+                    <input
+                      type="date"
+                      value={scheduleForm.sessionEndDate}
+                      onChange={e => setScheduleForm(p => ({ ...p, sessionEndDate: e.target.value }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '14px', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                </div>
               </div>
 
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Exam Name / Title</label>
-                <input
-                  type="text"
-                  required
-                  value={examForm.name}
-                  onChange={(e) => setExamForm({ ...examForm, name: e.target.value })}
-                  style={{
-                    width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', sans-serif"
-                  }}
-                />
-              </div>
+              {/* ── SECTION B: Subject Schedule Rows ── */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', marginBottom: '12px' }}>
+                  <h3 style={{ fontSize: '13px', fontWeight: 700, color: '#374151',
+                    textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+                    Subjects — Day & Time Schedule
+                  </h3>
+                  {scheduleForm.batchId && batchSubjectOptions.length === 0 && (
+                    <p style={{ fontSize: '11px', color: '#D97706', fontWeight: 600, margin: 0 }}>
+                      ⚠ Assign subjects to this batch first in Batch Manager
+                    </p>
+                  )}
+                </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Exam Type</label>
-                  <select
-                    value={examForm.type}
-                    onChange={(e) => setExamForm({ ...examForm, type: e.target.value })}
+                {/* Column headers */}
+                {scheduleForm.batchId && batchSubjectOptions.length > 0 && (
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '2fr 1.2fr 0.8fr 0.8fr 0.7fr 0.7fr 1fr 32px',
+                    gap: '8px', padding: '6px 8px',
+                    fontSize: '10px', fontWeight: 700, color: '#9CA3AF',
+                    textTransform: 'uppercase', letterSpacing: '0.05em'
+                  }}>
+                    <div>Subject</div>
+                    <div>Date</div>
+                    <div>Start</div>
+                    <div>End</div>
+                    <div>Total</div>
+                    <div>Pass</div>
+                    <div>Venue</div>
+                    <div></div>
+                  </div>
+                )}
+
+                {/* Subject rows */}
+                {(scheduleForm.subjectRows || []).map((row, idx) => (
+                  <div key={idx} style={{
+                    display: 'grid',
+                    gridTemplateColumns: '2fr 1.2fr 0.8fr 0.8fr 0.7fr 0.7fr 1fr 32px',
+                    gap: '8px', marginBottom: '8px', alignItems: 'center'
+                  }}>
+
+                    {/* Subject dropdown — from batch.subjects */}
+                    <select
+                      value={row.subjectId}
+                      disabled={!scheduleForm.batchId}
+                      onChange={e => {
+                        const sub = batchSubjectOptions.find(s => s.id === e.target.value);
+                        const updated = [...scheduleForm.subjectRows];
+                        updated[idx] = {
+                          ...updated[idx],
+                          subjectId: e.target.value,
+                          subjectName: sub?.name || '',
+                          subjectCode: sub?.code || ''
+                        };
+                        setScheduleForm(p => ({ ...p, subjectRows: updated }));
+                      }}
+                      style={{ padding: '8px 10px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '12px', background: 'white',
+                        opacity: !scheduleForm.batchId ? 0.5 : 1 }}>
+                      <option value="">— Subject —</option>
+                      {batchSubjectOptions.map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.code ? `${s.code} — ${s.name}` : s.name}
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* Date */}
+                    <input
+                      type="date"
+                      value={row.date}
+                      min={scheduleForm.sessionStartDate || ''}
+                      max={scheduleForm.sessionEndDate || ''}
+                      onChange={e => {
+                        const updated = [...scheduleForm.subjectRows];
+                        updated[idx] = { ...updated[idx], date: e.target.value };
+                        setScheduleForm(p => ({ ...p, subjectRows: updated }));
+                      }}
+                      style={{ padding: '8px 6px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '12px', width: '100%',
+                        boxSizing: 'border-box' }}
+                    />
+
+                    {/* Start Time */}
+                    <input
+                      type="time"
+                      value={row.startTime}
+                      onChange={e => {
+                        const updated = [...scheduleForm.subjectRows];
+                        updated[idx] = { ...updated[idx], startTime: e.target.value };
+                        setScheduleForm(p => ({ ...p, subjectRows: updated }));
+                      }}
+                      style={{ padding: '8px 6px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '12px', width: '100%',
+                        boxSizing: 'border-box' }}
+                    />
+
+                    {/* End Time */}
+                    <input
+                      type="time"
+                      value={row.endTime}
+                      onChange={e => {
+                        const updated = [...scheduleForm.subjectRows];
+                        updated[idx] = { ...updated[idx], endTime: e.target.value };
+                        setScheduleForm(p => ({ ...p, subjectRows: updated }));
+                      }}
+                      style={{ padding: '8px 6px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '12px', width: '100%',
+                        boxSizing: 'border-box' }}
+                    />
+
+                    {/* Total Marks */}
+                    <input
+                      type="number"
+                      value={row.totalMarks}
+                      min={1}
+                      onChange={e => {
+                        const updated = [...scheduleForm.subjectRows];
+                        updated[idx] = { ...updated[idx], totalMarks: Number(e.target.value) };
+                        setScheduleForm(p => ({ ...p, subjectRows: updated }));
+                      }}
+                      style={{ padding: '8px 6px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '12px', width: '100%',
+                        boxSizing: 'border-box', textAlign: 'center' }}
+                    />
+
+                    {/* Pass Marks */}
+                    <input
+                      type="number"
+                      value={row.passMarks}
+                      min={0}
+                      onChange={e => {
+                        const updated = [...scheduleForm.subjectRows];
+                        updated[idx] = { ...updated[idx], passMarks: Number(e.target.value) };
+                        setScheduleForm(p => ({ ...p, subjectRows: updated }));
+                      }}
+                      style={{ padding: '8px 6px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '12px', width: '100%',
+                        boxSizing: 'border-box', textAlign: 'center' }}
+                    />
+
+                    {/* Venue */}
+                    <input
+                      type="text"
+                      placeholder="Hall A"
+                      value={row.venue}
+                      onChange={e => {
+                        const updated = [...scheduleForm.subjectRows];
+                        updated[idx] = { ...updated[idx], venue: e.target.value };
+                        setScheduleForm(p => ({ ...p, subjectRows: updated }));
+                      }}
+                      style={{ padding: '8px 6px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', fontSize: '12px', width: '100%',
+                        boxSizing: 'border-box' }}
+                    />
+
+                    {/* Remove row button */}
+                    <button
+                      onClick={() => {
+                        if (scheduleForm.subjectRows.length === 1) return;
+                        const updated = scheduleForm.subjectRows.filter((_, i) => i !== idx);
+                        setScheduleForm(p => ({ ...p, subjectRows: updated }));
+                      }}
+                      disabled={scheduleForm.subjectRows.length === 1}
+                      style={{
+                        background: scheduleForm.subjectRows.length === 1 ? '#F1F5F9' : '#FEF2F2',
+                        border: `1px solid ${scheduleForm.subjectRows.length === 1 ? '#E2E8F0' : '#FCA5A5'}`,
+                        borderRadius: '6px',
+                        color: scheduleForm.subjectRows.length === 1 ? '#CBD5E0' : '#DC2626',
+                        width: '32px', height: '32px',
+                        fontSize: '16px', cursor: scheduleForm.subjectRows.length === 1 ? 'default' : 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0
+                      }}>
+                      ×
+                    </button>
+                  </div>
+                ))}
+
+                {/* Add Subject row button */}
+                {scheduleForm.batchId && batchSubjectOptions.length > 0 && (
+                  <button
+                    onClick={() => setScheduleForm(p => ({
+                      ...p,
+                      subjectRows: [...p.subjectRows, emptySubjectRow()]
+                    }))}
                     style={{
-                      width: "100%", padding: "9px 36px 9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', sans-serif", appearance: "none", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", cursor: "pointer"
-                    }}
-                  >
-                    <option value="Term Test">Term Test</option>
-                    <option value="Mock Exam">Mock Exam</option>
-                    <option value="Assignment">Assignment</option>
-                    <option value="Final Exam">Final Exam</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Target Batch</label>
-                  <select
-                    value={examForm.batch}
-                    onChange={(e) => {
-                      const bName = e.target.value;
-                      const autoNum = getNextExamNumber(examForm.subjectId, bName);
-                      const subjObj = subjects.find((s) => s.id === examForm.subjectId);
-                      setExamForm({
-                        ...examForm,
-                        batch: bName,
-                        name: `Exam #${autoNum} - ${subjObj ? subjObj.name : ""}`
-                      });
-                    }}
-                    style={{
-                      width: "100%", padding: "9px 36px 9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', sans-serif", appearance: "none", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", cursor: "pointer"
-                    }}
-                  >
-                    {Array.from(new Set(students.map((s) => s.batch).filter(Boolean))).map((bName) => (
-                      <option key={bName} value={bName}>{bName}</option>
-                    ))}
-                  </select>
-                </div>
+                      marginTop: '8px',
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      border: '1px dashed #4F46E5',
+                      background: '#EEF2FF',
+                      color: '#4F46E5',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      width: '100%'
+                    }}>
+                    + Add Another Subject
+                  </button>
+                )}
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={examForm.date}
-                    onChange={(e) => setExamForm({ ...examForm, date: e.target.value })}
-                    style={{ width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', sans-serif" }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Time Session</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 09:00 – 11:00 AM"
-                    value={examForm.time}
-                    onChange={(e) => setExamForm({ ...examForm, time: e.target.value })}
-                    style={{ width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', sans-serif" }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Total Marks</label>
-                  <input
-                    type="number"
-                    min="10"
-                    required
-                    value={examForm.totalMarks}
-                    onChange={(e) => setExamForm({ ...examForm, totalMarks: e.target.value })}
-                    style={{ width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', sans-serif" }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Pass Mark</label>
-                  <input
-                    type="number"
-                    min="0"
-                    required
-                    value={examForm.passMark}
-                    onChange={(e) => setExamForm({ ...examForm, passMark: e.target.value })}
-                    style={{ width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', sans-serif" }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Venue & Invigilator Notes</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Hall A, Invigilator: Mr. Gamini Silva"
-                  value={examForm.classroom}
-                  onChange={(e) => setExamForm({ ...examForm, classroom: e.target.value })}
-                  style={{ width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', sans-serif" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "24px", paddingTop: "18px", borderTop: "1px solid #F4F5F7" }}>
-                <button type="button" onClick={() => setShowAddExamModal(false)} style={{ background: "#FFFFFF", color: "#4A5568", border: "1px solid #E3E6EA", borderRadius: "8px", padding: "8px 16px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-                <button type="submit" style={{ background: 'linear-gradient(135deg, #2B6CB0, #1A4A8A)', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(43,108,176,0.30)' }}>
-                  {editingExam ? "Save Changes" : "Schedule Exam"}
+              {/* ── FOOTER ── */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px',
+                marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #E2E8F0' }}>
+                <button
+                  onClick={() => setShowAddExamModal(false)}
+                  style={{ padding: '10px 20px', borderRadius: '8px',
+                    border: '1px solid #E2E8F0', background: 'white', color: '#374151',
+                    fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}>
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveExamSession}
+                  style={{ padding: '10px 24px', borderRadius: '8px',
+                    border: 'none',
+                    background: (scheduleForm.examSessionName && scheduleForm.batchId &&
+                      scheduleForm.subjectRows.some(r => r.subjectId && r.date))
+                      ? '#4F46E5' : '#A5B4FC',
+                    color: 'white', fontSize: '14px', fontWeight: 700,
+                    cursor: 'pointer' }}>
+                  Schedule Exam Session
                 </button>
               </div>
-            </form>
+
+            </div>
           </div>
         </div>
       )}
