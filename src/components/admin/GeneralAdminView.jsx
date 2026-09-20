@@ -492,10 +492,27 @@ export const GeneralAdminView = ({ isMobile }) => {
   const [quickRoomId, setQuickRoomId] = useState('');
   const [quickRoomScope, setQuickRoomScope] = useState('week');
 
-  const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-  const [allocDay, setAllocDay] = useState(todayDayName);
+  const [allocDateOffset, setAllocDateOffset] = useState(0); // 0 = today, 1 = tomorrow, -1 = yesterday
+  const [allocRefresh, setAllocRefresh] = useState(0);
   const [allocationDate, setAllocationDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [selectedClassroomForSchedule, setSelectedClassroomForSchedule] = useState("All");
+
+  const getAllocDate = (offset) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return d;
+  };
+
+  const allocDate = getAllocDate(allocDateOffset);
+  const allocDayName = allocDate.toLocaleDateString('en-US', { weekday: 'long' });
+  const allocDateStr = allocDate.toISOString().slice(0, 10); // 'YYYY-MM-DD'
+
+  const allocDateLabel = (() => {
+    if (allocDateOffset === 0) return `Today — ${allocDate.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })}`;
+    if (allocDateOffset === 1) return `Tomorrow — ${allocDate.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })}`;
+    if (allocDateOffset === -1) return `Yesterday — ${allocDate.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })}`;
+    return allocDate.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+  })();
 
   const getWeekStart = (offset) => {
     const today = new Date();
@@ -524,7 +541,7 @@ export const GeneralAdminView = ({ isMobile }) => {
   const resolveClassroom = (session, weekStartStr) => {
     const overrides = safeLS('pba_classroom_overrides', []);
     const override = (overrides || []).find(
-      o => o.sessionId === session.id && o.weekStart === weekStartStr
+      o => o.sessionId === session.id && (o.weekStart === weekStartStr || o.date === weekStartStr)
     );
     if (override) {
       return { classroomId: override.classroomId,
@@ -536,12 +553,99 @@ export const GeneralAdminView = ({ isMobile }) => {
              isOverride: false };
   };
 
+  const resolveAllocClassroom = (session, dateStr) => {
+    const overrides = safeLS('pba_classroom_overrides', []);
+    const dateOverride = (overrides || []).find(
+      o => o.sessionId === session.id && o.date === dateStr
+    );
+    if (dateOverride) return {
+      classroomId: dateOverride.classroomId,
+      classroomName: dateOverride.classroomName,
+      isOverride: true
+    };
+    const weekOverride = (overrides || []).find(
+      o => o.sessionId === session.id && o.weekStart === dateStr
+    );
+    if (weekOverride) return {
+      classroomId: weekOverride.classroomId,
+      classroomName: weekOverride.classroomName,
+      isOverride: true
+    };
+    return {
+      classroomId: session.classroomId || '',
+      classroomName: session.classroomName || '',
+      isOverride: false
+    };
+  };
+
+  const saveAllocClassroom = (session, dateStr, classroomId) => {
+    const classroom = (classrooms || []).find(c => c.id === classroomId);
+    const overrides = safeLS('pba_classroom_overrides', []);
+    const cleaned = (overrides || []).filter(
+      o => !(o.sessionId === session.id && (o.date === dateStr || o.weekStart === dateStr))
+    );
+    const newOverride = classroomId
+      ? [{
+          sessionId: session.id,
+          date: dateStr,
+          classroomId: classroom?.id || classroomId,
+          classroomName: classroom?.name || ''
+        }]
+      : [];
+    saveLS('pba_classroom_overrides', [...cleaned, ...newOverride]);
+  };
+
+  const buildWhatsAppMessage = () => {
+    const timetable = safeLS('pba_timetable', []);
+    const sessions = (timetable || [])
+      .filter(s => s.day === allocDayName)
+      .sort((a, b) => {
+        const ta = (a.startTime || '00:00').replace(':', '');
+        const tb = (b.startTime || '00:00').replace(':', '');
+        return Number(ta) - Number(tb);
+      });
+
+    if (sessions.length === 0) {
+      return `📋 *PBA Daily Allocation*\n${allocDateLabel}\n\nNo sessions scheduled.`;
+    }
+
+    const unassigned = sessions.filter(s => {
+      const r = resolveAllocClassroom(s, allocDateStr);
+      return !r.classroomId;
+    }).length;
+
+    let msg = `📋 *PBA Daily Allocation*\n`;
+    msg += `📅 ${allocDateLabel}\n`;
+    if (unassigned > 0) {
+      msg += `⚠ ${unassigned} session(s) without classroom\n`;
+    }
+    msg += `\n`;
+
+    sessions.forEach(s => {
+      const room = resolveAllocClassroom(s, allocDateStr);
+      const roomText = room.classroomName || '⚠ TBC';
+      const assistants = (s.assistants || [])
+        .filter(a => a.lecturerId)
+        .map(a => a.lecturerName)
+        .join(', ');
+
+      msg += `🕐 *${s.startTime}–${s.endTime}*\n`;
+      msg += `🏛 ${roomText}\n`;
+      msg += `📚 ${s.subjectName || '—'} · ${s.batchName || '—'}\n`;
+      msg += `👤 ${s.lecturerName || '—'}`;
+      if (assistants) msg += ` (Asst: ${assistants})`;
+      msg += `\n\n`;
+    });
+
+    msg += `_Sent from PBA Portal_`;
+    return msg;
+  };
+
   const allocSessions = (() => {
     const timetable = safeLS('pba_timetable', []);
     return (timetable || [])
-      .filter(s => s.day === allocDay)
+      .filter(s => s.day === allocDayName)
       .sort((a, b) => {
-        // Sort by startTime ascending
         const ta = (a.startTime || '00:00').replace(':', '');
         const tb = (b.startTime || '00:00').replace(':', '');
         return Number(ta) - Number(tb);
@@ -2461,89 +2565,138 @@ export const GeneralAdminView = ({ isMobile }) => {
                   Daily Allocation Sheet
                 </h3>
                 <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#6B7280' }}>
-                  Classroom usage schedule for the selected week & day
+                  Classroom usage schedule for the selected date
                 </p>
               </div>
 
-              {/* Week Navigation */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {/* Share via WhatsApp */}
+              <button
+                type="button"
+                onClick={() => {
+                  const msg = buildWhatsAppMessage();
+                  const encoded = encodeURIComponent(msg);
+                  window.open(`https://wa.me/?text=${encoded}`, '_blank');
+                }}
+                style={{
+                  padding: '8px 16px', borderRadius: '8px',
+                  background: '#25D366', border: 'none', color: 'white',
+                  fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: '6px'
+                }}>
+                📤 Share via WhatsApp
+              </button>
+            </div>
+
+            {/* Date Navigation */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              marginBottom: '16px', flexWrap: 'wrap', background: '#F8FAFC',
+              padding: '12px 16px', borderRadius: '10px', border: '1px solid #E2E8F0'
+            }}>
+              {/* Prev Day */}
+              <button
+                type="button"
+                onClick={() => setAllocDateOffset(prev => prev - 1)}
+                style={{
+                  padding: '8px 14px', borderRadius: '8px', cursor: 'pointer',
+                  background: 'white', border: '1px solid #E3E6EA',
+                  fontWeight: 600, fontSize: '13px', color: '#374151'
+                }}>
+                ← Prev
+              </button>
+
+              {/* Date label */}
+              <div style={{
+                fontWeight: 800, fontSize: '15px', color: '#111827',
+                flex: 1, textAlign: 'center', minWidth: '200px'
+              }}>
+                📅 {allocDateLabel}
+              </div>
+
+              {/* Next Day */}
+              <button
+                type="button"
+                onClick={() => setAllocDateOffset(prev => prev + 1)}
+                style={{
+                  padding: '8px 14px', borderRadius: '8px', cursor: 'pointer',
+                  background: 'white', border: '1px solid #E3E6EA',
+                  fontWeight: 600, fontSize: '13px', color: '#374151'
+                }}>
+                Next →
+              </button>
+
+              {/* Today shortcut */}
+              {allocDateOffset !== 0 && (
                 <button
                   type="button"
-                  onClick={() => setWeekOffset(prev => prev - 1)}
+                  onClick={() => setAllocDateOffset(0)}
                   style={{
-                    padding: '6px 12px', borderRadius: '6px',
-                    border: '1px solid #E3E6EA', background: 'white',
-                    fontSize: '12px', fontWeight: 600, cursor: 'pointer', color: '#374151'
-                  }}>
-                  ← Prev Week
-                </button>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: '#1A202C' }}>
-                  {weekLabel}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setWeekOffset(prev => prev + 1)}
-                  style={{
-                    padding: '6px 12px', borderRadius: '6px',
-                    border: '1px solid #E3E6EA', background: 'white',
-                    fontSize: '12px', fontWeight: 600, cursor: 'pointer', color: '#374151'
-                  }}>
-                  Next Week →
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setWeekOffset(0)}
-                  style={{
-                    padding: '6px 10px', borderRadius: '6px',
-                    border: '1px solid #C7D2FE', background: '#EEF2FF',
-                    color: '#4F46E5', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                    padding: '8px 14px', borderRadius: '8px', cursor: 'pointer',
+                    background: '#EEF2FF', border: '1px solid #C7D2FE',
+                    fontWeight: 700, fontSize: '12px', color: '#4F46E5'
                   }}>
                   Today
                 </button>
-              </div>
+              )}
 
-              {/* Day picker & Share */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <select
-                  value={allocDay}
-                  onChange={e => setAllocDay(e.target.value)}
-                  style={{
-                    padding: '8px 14px', borderRadius: '8px',
-                    border: '1px solid #E3E6EA', fontSize: '13px',
-                    fontWeight: 700, background: 'white', color: '#1A202C',
-                    cursor: 'pointer'
-                  }}>
-                  {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
-                    .map((d, idx) => (
-                      <option key={d} value={d}>
-                        {d} ({getDayDate(idx)})
-                      </option>
-                    ))}
-                </select>
-
+              {/* Tomorrow shortcut */}
+              {allocDateOffset !== 1 && (
                 <button
-                  onClick={() => {
-                    const rows = allocSessions.map(s => {
-                      const room = resolveClassroom(s, weekStartStr);
-                      return `${s.startTime || ''}–${s.endTime || ''} | ${room.classroomName || '— Not set —'} | ${s.batchName || ''} | ${s.subjectName || ''} | ${s.lecturerName || ''}`;
-                    }).join('\n');
-                    const text = `📋 Daily Allocation Sheet — ${allocDay} (${weekStartStr})\n\n` +
-                      (rows || 'No sessions scheduled.') +
-                      `\n\nPBA Full-Time Portal`;
-                    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-                  }}
+                  type="button"
+                  onClick={() => setAllocDateOffset(1)}
                   style={{
-                    padding: '8px 16px', borderRadius: '8px',
-                    background: '#25D366', border: 'none', color: 'white',
-                    fontSize: '12px', fontWeight: 700, cursor: 'pointer'
+                    padding: '8px 14px', borderRadius: '8px', cursor: 'pointer',
+                    background: '#F0FDF4', border: '1px solid #BBF7D0',
+                    fontWeight: 700, fontSize: '12px', color: '#166534'
                   }}>
-                  📤 Share via WhatsApp
+                  Tomorrow
                 </button>
-              </div>
+              )}
             </div>
 
+            {/* Room Assignment Progress Banner */}
+            {(() => {
+              const total = allocSessions.length;
+              const assigned = allocSessions.filter(s => {
+                const r = resolveAllocClassroom(s, allocDateStr);
+                return !!r.classroomId;
+              }).length;
+              if (total === 0) return null;
+              const allDone = assigned === total;
+              return (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '12px',
+                  padding: '10px 16px', marginBottom: '12px', borderRadius: '10px',
+                  background: allDone ? '#F0FDF4' : '#FFFBEB',
+                  border: `1px solid ${allDone ? '#BBF7D0' : '#FDE68A'}`
+                }}>
+                  <div style={{ flex: 1 }}>
+                    <span style={{
+                      fontWeight: 800, fontSize: '13px',
+                      color: allDone ? '#166534' : '#92400E'
+                    }}>
+                      {allDone ? '✅ All rooms assigned' : `⚠ ${total - assigned} of ${total} rooms not yet assigned`}
+                    </span>
+                  </div>
+                  {/* Mini progress bar */}
+                  <div style={{
+                    width: '120px', height: '6px', background: '#E5E7EB',
+                    borderRadius: '3px', overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      width: `${total > 0 ? (assigned / total) * 100 : 0}%`,
+                      height: '100%',
+                      background: allDone ? '#22C55E' : '#F59E0B',
+                      borderRadius: '3px', transition: 'width 0.3s'
+                    }} />
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Allocation Table */}
             <div style={{ overflowX: 'auto' }}>
-              <table style={{
+              <table key={`${allocDateStr}-${allocRefresh}`} style={{
                 width: '100%', borderCollapse: 'collapse',
                 fontSize: '13px'
               }}>
@@ -2569,7 +2722,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                       }}>
                         <div style={{ fontSize: '28px', marginBottom: '8px' }}>📋</div>
                         <div style={{ fontWeight: 600, marginBottom: '4px' }}>
-                          No sessions scheduled for {allocDay} ({weekStartStr})
+                          No sessions scheduled for {allocDateLabel}
                         </div>
                         <div style={{ fontSize: '12px' }}>
                           Sessions are added via the Visual Timetable Builder.
@@ -2578,7 +2731,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                     </tr>
                   ) : (
                     allocSessions.map((s, i) => {
-                      const room = resolveClassroom(s, weekStartStr);
+                      const room = resolveAllocClassroom(s, allocDateStr);
                       return (
                         <tr key={s.id || i} style={{
                           borderBottom: '1px solid #F3F4F6',
@@ -2588,41 +2741,33 @@ export const GeneralAdminView = ({ isMobile }) => {
                             color: '#1A202C', whiteSpace: 'nowrap' }}>
                             {s.startTime || '—'}{s.endTime ? `–${s.endTime}` : ''}
                           </td>
-                          <td style={{ padding: '10px 14px', color: '#374151' }}>
-                            {room.classroomId ? (
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: room.isOverride ? '#4F46E5' : '#10B981', flexShrink: 0 }} />
-                                {room.classroomName || room.classroomId}
-                                {room.isOverride && (
-                                  <span style={{
-                                    marginLeft: '6px', padding: '1px 5px',
-                                    borderRadius: '6px', background: '#EEF2FF',
-                                    color: '#4F46E5', fontSize: '9px', fontWeight: 700
-                                  }}>THIS WEEK</span>
-                                )}
-                              </span>
-                            ) : (
-                              <span style={{ color: '#F59E0B', fontStyle: 'italic', fontSize: '12px' }}>— Not set —</span>
-                            )}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setQuickRoomSession({
-                                  session: s,
-                                  currentRoom: room,
-                                  weekStartStr
-                                });
-                                setQuickRoomId(room.classroomId || '');
+                          <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+                            <select
+                              value={room.classroomId || ''}
+                              onChange={e => {
+                                saveAllocClassroom(s, allocDateStr, e.target.value);
+                                setAllocRefresh(n => n + 1);
                               }}
                               style={{
-                                marginLeft: '8px', padding: '2px 7px', fontSize: '9px',
-                                fontWeight: 700, borderRadius: '5px', cursor: 'pointer',
-                                background: 'transparent',
-                                border: '1px dashed #D1D5DB',
-                                color: '#6B7280'
+                                padding: '6px 10px', borderRadius: '8px', fontSize: '13px',
+                                border: room.classroomId
+                                  ? '1px solid #D1FAE5'
+                                  : '2px dashed #FCD34D',
+                                background: room.classroomId ? '#F0FDF4' : '#FFFBEB',
+                                color: room.classroomId ? '#166534' : '#92400E',
+                                fontWeight: 600, cursor: 'pointer', minWidth: '130px'
                               }}>
-                              {room.classroomId ? '↕ Change Room' : '+ Assign Room'}
-                            </button>
+                              <option value="">— Assign Room —</option>
+                              {(classrooms || []).map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                            {room.isOverride && (
+                              <div style={{ fontSize: '9px', color: '#4F46E5',
+                                marginTop: '2px', fontWeight: 700 }}>
+                                ✓ Assigned for this date
+                              </div>
+                            )}
                           </td>
                           <td style={{ padding: '10px 14px', color: '#374151' }}>
                             {s.batchName || '—'}
