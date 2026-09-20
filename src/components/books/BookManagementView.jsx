@@ -1,13 +1,31 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useApp } from "../../context/AppContext";
 import { PrintJobKanban } from "./PrintJobKanban";
-import { BookOpen, FileCheck, Printer, Users, Plus, AlertTriangle } from "lucide-react";
+import { BookOpen, FileCheck, Printer, Users, Plus, AlertTriangle, Eye, Check } from "lucide-react";
 
-import { T, theme, type as t } from "../../theme";
+import { theme, type as t } from "../../theme";
+
+const safeLS = (key, fallback = []) => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const saveLS = (key, val) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(val));
+  } catch (err) {
+    console.error("saveLS error:", err);
+  }
+};
 
 export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
   const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
-  const { data, setData, currentUser, submitBookRequisition, approveBookRequisition, issueBookToStudent, addBookToCatalogue, filterByBranch, effectiveBranch } = useApp();
+  const { data, setData, currentUser, submitBookRequisition, approveBookRequisition, exportToCSV } = useApp();
 
   const getInitialTab = () => {
     if (initialTab === "printing" || initialTab === "printingQueue") return "printing";
@@ -17,7 +35,7 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
 
   const [activeTab, setActiveTab] = useState(getInitialTab);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (initialTab === "printing" || initialTab === "printingQueue") {
       setActiveTab("printing");
     } else if (initialTab === "catalogue" || initialTab === "textbookCatalogue") {
@@ -53,20 +71,33 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
     studentId: data.students[0]?.id || "",
     bookId: data.books[0]?.id || "",
     subjectId: data.subjects[0]?.id || "",
-    issuedAt: new Date().toISOString().split("T")[0],
-    dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-    condition: "Good",
-    notes: ""
+    issuedOn: new Date().toISOString().split("T")[0],
+    notes: "",
+    status: "pending_distribution"
   });
 
   // Persistent bookIssues state (synced with pba_book_issues in localStorage)
   const [bookIssues, setBookIssues] = useState(() => {
-    try {
-      const saved = localStorage.getItem("pba_book_issues");
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error("Failed to parse pba_book_issues:", e);
+    const raw = safeLS("pba_book_issues", []);
+    if (raw.length > 0) {
+      // Normalize existing issues to remove returned/overdue workflow
+      return raw.map((i) => ({
+        id: i.id || "bi-" + Date.now(),
+        studentId: i.studentId || "stu-1",
+        studentName: i.studentName || "Student",
+        bookId: i.bookId || "bk-1",
+        bookTitle: i.bookTitle || "Textbook",
+        subjectId: i.subjectId || "sub-1",
+        subjectCode: i.subjectCode || "BS",
+        batchId: i.batchId || i.batchName || "Batch",
+        batchName: i.batchName || i.batchId || "Batch",
+        issuedOn: i.issuedOn || i.issuedAt || new Date().toISOString().split("T")[0],
+        issuedBy: i.issuedBy || "Admin",
+        notes: i.notes || "",
+        status: i.status === "pending_distribution" ? "pending_distribution" : "issued"
+      }));
     }
+
     return [
       {
         id: "bi-1",
@@ -78,12 +109,10 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
         batchName: "Batch 2024-A (A/L Commerce)",
         subjectId: "sub-1",
         subjectCode: "BS",
-        issuedAt: "2026-09-10",
-        dueDate: "2026-10-10",
-        returnedAt: null,
-        condition: "Good",
+        issuedOn: "2026-09-10",
         issuedBy: "Admin",
-        notes: "Initial textbook issue"
+        notes: "Initial textbook issue",
+        status: "issued"
       },
       {
         id: "bi-2",
@@ -95,26 +124,48 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
         batchName: "Batch 2024-A (A/L Commerce)",
         subjectId: "sub-2",
         subjectCode: "ACC",
-        issuedAt: "2026-08-01",
-        dueDate: "2026-09-01",
-        returnedAt: "2026-08-30",
-        condition: "Good",
+        issuedOn: "2026-09-12",
         issuedBy: "Admin",
-        notes: "Returned on time"
+        notes: "Batch handout",
+        status: "pending_distribution"
       }
     ];
   });
 
-  React.useEffect(() => {
-    try {
-      localStorage.setItem("pba_book_issues", JSON.stringify(bookIssues));
-    } catch (e) {
-      console.error("Failed saving pba_book_issues:", e);
-    }
+  // Sync to localStorage
+  useEffect(() => {
+    saveLS("pba_book_issues", bookIssues);
   }, [bookIssues]);
 
+  // Sync with storage window event so ready stage from PrintJobKanban updates immediately
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const updated = safeLS("pba_book_issues", []);
+      if (updated.length > 0) {
+        setBookIssues(updated.map(i => ({
+          ...i,
+          status: i.status === "pending_distribution" ? "pending_distribution" : "issued"
+        })));
+      }
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
+
+  // Sync when activeTab changes to issues
+  useEffect(() => {
+    if (activeTab === "issues") {
+      const updated = safeLS("pba_book_issues", []);
+      if (updated.length > 0) {
+        setBookIssues(updated.map(i => ({
+          ...i,
+          status: i.status === "pending_distribution" ? "pending_distribution" : "issued"
+        })));
+      }
+    }
+  }, [activeTab]);
+
   // Issue tab filters
-  const [issueFilterBranch, setIssueFilterBranch] = useState("All");
   const [issueFilterBatch, setIssueFilterBatch] = useState("All");
   const [issueFilterSubject, setIssueFilterSubject] = useState("All");
   const [issueFilterStatus, setIssueFilterStatus] = useState("All");
@@ -158,7 +209,7 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
 
   const handleIssueBook = (e) => {
     e.preventDefault();
-    const std = data.students.find((s) => s.id === issueForm.studentId);
+    const std = data.students.find((s) => s.id === issueForm.studentId) || data.students[0];
     const bk = data.books.find((b) => b.id === issueForm.bookId) || data.books[0];
     const subj = data.subjects.find((s) => s.id === (issueForm.subjectId || bk?.subjectId)) || data.subjects[0];
     if (!std || !bk) return;
@@ -173,24 +224,25 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
       batchName: std.batch,
       subjectId: subj?.id || "sub-1",
       subjectCode: subj?.code || "BS",
-      issuedAt: issueForm.issuedAt,
-      dueDate: issueForm.dueDate || null,
-      returnedAt: null,
-      condition: issueForm.condition || "Good",
-      issuedBy: currentUser.name || "Admin",
-      notes: issueForm.notes || ""
+      issuedOn: issueForm.issuedOn || new Date().toISOString().split("T")[0],
+      issuedBy: currentUser?.name || "Admin",
+      notes: issueForm.notes || "",
+      status: issueForm.status || "pending_distribution"
     };
 
-    setBookIssues([newIssue, ...bookIssues]);
+    const updated = [newIssue, ...bookIssues];
+    setBookIssues(updated);
+    saveLS("pba_book_issues", updated);
     setShowIssueModal(false);
   };
 
-  const handleMarkReturned = (issueId) => {
+  const handleMarkIssued = (issueId) => {
     const today = new Date().toISOString().split("T")[0];
-    const cond = window.prompt("Condition at return (Good / Fair / Damaged):", "Good");
-    setBookIssues((prev) =>
-      prev.map((bi) => (bi.id === issueId ? { ...bi, returnedAt: today, condition: cond || bi.condition } : bi))
+    const updated = bookIssues.map((bi) =>
+      bi.id === issueId ? { ...bi, status: "issued", issuedOn: bi.issuedOn || today } : bi
     );
+    setBookIssues(updated);
+    saveLS("pba_book_issues", updated);
   };
 
   return (
@@ -216,7 +268,8 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
           padding: "4px",
           borderRadius: "10px",
           width: "fit-content",
-          marginBottom: "20px"
+          marginBottom: "20px",
+          flexWrap: isMobileState ? "wrap" : "nowrap"
         }}
       >
         {role !== "Printing Staff" && (
@@ -527,81 +580,91 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                 </tr>
               </thead>
               <tbody>
-                {data.bookRequisitions.map((req) => (
-                  <tr
-                    key={req.id}
-                    style={{
-                      background: req.isUrgent && req.status === "Pending" ? theme.dangerLight : "transparent",
-                      transition: "background 0.15s"
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!(req.isUrgent && req.status === "Pending")) e.currentTarget.style.background = "#F8FAFE";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!(req.isUrgent && req.status === "Pending")) e.currentTarget.style.background = "transparent";
-                    }}
-                  >
-                    <td style={{ padding: '13px 16px', fontSize: '13px', fontWeight: 600, color: theme.textPrimary, borderBottom: '1px solid #F4F5F7' }}>
-                      {req.bookTitle}
-                      {req.isUrgent && (
-                        <span style={{ background: theme.dangerLight, color: theme.danger, border: '1px solid ' + theme.dangerBorder, padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, marginLeft: '6px' }}>
-                          Urgent (&lt;14 days)
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.accent, fontWeight: 500, borderBottom: '1px solid #F4F5F7' }}>
-                      {req.subject}
-                    </td>
-                    <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
-                      {req.batch}
-                    </td>
-                    <td style={{ padding: '13px 16px', fontSize: '13px', fontWeight: 600, color: theme.textPrimary, borderBottom: '1px solid #F4F5F7' }}>
-                      {req.quantity}
-                    </td>
-                    <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
-                      {req.dateNeeded}
-                    </td>
-                    <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
-                      {req.requestedBy}
-                    </td>
-                    <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
-                      {req.status === "Approved" ? (
-                        <span style={{ background: theme.successLight, color: theme.success, border: '1px solid ' + theme.successBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#38A169', display: 'inline-block' }} />
-                          Approved
-                        </span>
-                      ) : (
-                        <span style={{ background: theme.warningLight, color: theme.warning, border: '1px solid ' + theme.warningBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#D97706', display: 'inline-block' }} />
-                          Pending
-                        </span>
-                      )}
-                    </td>
-                    {role === "Admin" && (
-                      <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
-                        {req.status === "Pending" ? (
-                          <button
-                            onClick={() => approveBookRequisition(req.id)}
-                            style={{
-                              background: 'linear-gradient(135deg, #2B6CB0, #1A4A8A)',
-                              color: '#FFFFFF',
-                              border: 'none',
-                              borderRadius: '8px',
-                              padding: '6px 12px',
-                              fontSize: '12px',
-                              fontWeight: 600,
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Approve & Print
-                          </button>
-                        ) : (
-                          <span style={{ fontSize: "12px", color: theme.success, fontWeight: 600 }}>In Queue</span>
+                {data.bookRequisitions.map((req) => {
+                  // Find matching print job status if approved
+                  const matchingJob = (data.printJobs || []).find(
+                    (j) => j.bookTitle === req.bookTitle && j.batch === req.batch
+                  );
+                  const isJobCompleted = matchingJob && (matchingJob.status === "completed" || matchingJob.status === "Completed");
+
+                  return (
+                    <tr
+                      key={req.id}
+                      style={{
+                        background: req.isUrgent && req.status === "Pending" ? theme.dangerLight : "transparent",
+                        transition: "background 0.15s"
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!(req.isUrgent && req.status === "Pending")) e.currentTarget.style.background = "#F8FAFE";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!(req.isUrgent && req.status === "Pending")) e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      <td style={{ padding: '13px 16px', fontSize: '13px', fontWeight: 600, color: theme.textPrimary, borderBottom: '1px solid #F4F5F7' }}>
+                        {req.bookTitle}
+                        {req.isUrgent && (
+                          <span style={{ background: theme.dangerLight, color: theme.danger, border: '1px solid ' + theme.dangerBorder, padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, marginLeft: '6px' }}>
+                            Urgent (&lt;14 days)
+                          </span>
                         )}
                       </td>
-                    )}
-                  </tr>
-                ))}
+                      <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.accent, fontWeight: 500, borderBottom: '1px solid #F4F5F7' }}>
+                        {req.subject}
+                      </td>
+                      <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
+                        {req.batch}
+                      </td>
+                      <td style={{ padding: '13px 16px', fontSize: '13px', fontWeight: 600, color: theme.textPrimary, borderBottom: '1px solid #F4F5F7' }}>
+                        {req.quantity}
+                      </td>
+                      <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
+                        {req.dateNeeded}
+                      </td>
+                      <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
+                        {req.requestedBy}
+                      </td>
+                      <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
+                        {req.status === "Approved" ? (
+                          <span style={{ background: theme.successLight, color: theme.success, border: '1px solid ' + theme.successBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#38A169', display: 'inline-block' }} />
+                            Approved
+                          </span>
+                        ) : (
+                          <span style={{ background: theme.warningLight, color: theme.warning, border: '1px solid ' + theme.warningBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#D97706', display: 'inline-block' }} />
+                            Pending
+                          </span>
+                        )}
+                      </td>
+                      {role === "Admin" && (
+                        <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
+                          {req.status === "Pending" ? (
+                            <button
+                              onClick={() => approveBookRequisition(req.id)}
+                              style={{
+                                background: 'linear-gradient(135deg, #4F46E5, #3730A3)',
+                                color: '#FFFFFF',
+                                border: 'none',
+                                borderRadius: '6px',
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              Approve & Print
+                            </button>
+                          ) : isJobCompleted ? (
+                            <span style={{ color: '#276749', fontSize: '11px', fontWeight: 600 }}>✓ Completed</span>
+                          ) : (
+                            <span style={{ color: '#718096', fontSize: '11px', fontWeight: 600 }}>● In Queue</span>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -609,46 +672,48 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
       )}
 
       {/* TAB 3: PRINTING QUEUE KANBAN */}
-      {activeTab === "printing" && <PrintJobKanban />}
+      {activeTab === "printing" && <PrintJobKanban isMobile={isMobileState} />}
 
       {/* TAB 4: STUDENT BOOK ISSUES */}
       {activeTab === "issues" && (() => {
-        const currentlyIssuedCount = bookIssues.filter((bi) => !bi.returnedAt).length;
-        const nowStr = new Date().toISOString().split("T")[0];
-        const overdueCount = bookIssues.filter((bi) => !bi.returnedAt && bi.dueDate && bi.dueDate < nowStr).length;
+        const totalIssued = bookIssues.filter((bi) => bi.status === "issued").length;
+        const pendingDistribution = bookIssues.filter((bi) => bi.status === "pending_distribution").length;
 
         const currentMonth = new Date().toISOString().slice(0, 7);
-        const returnedThisMonthCount = bookIssues.filter((bi) => bi.returnedAt && bi.returnedAt.startsWith(currentMonth)).length;
+        const issuedThisMonth = bookIssues.filter((bi) => bi.status === "issued" && bi.issuedOn && bi.issuedOn.startsWith(currentMonth)).length;
 
-        const distinctStudentsCount = new Set(bookIssues.filter((bi) => !bi.returnedAt).map((bi) => bi.studentId)).size;
+        const distinctStudentsCount = new Set(bookIssues.map((bi) => bi.studentId)).size;
 
         const filteredIssues = bookIssues.filter((bi) => {
-          if (issueFilterBatch !== "All" && bi.batchName !== issueFilterBatch) return false;
+          if (issueFilterBatch !== "All" && bi.batchName !== issueFilterBatch && bi.batchId !== issueFilterBatch) return false;
           if (issueFilterSubject !== "All" && bi.subjectId !== issueFilterSubject) return false;
-          if (issueFilterStatus === "Issued" && (bi.returnedAt || (bi.dueDate && bi.dueDate < nowStr))) return false;
-          if (issueFilterStatus === "Overdue" && (bi.returnedAt || !bi.dueDate || bi.dueDate >= nowStr)) return false;
-          if (issueFilterStatus === "Returned" && !bi.returnedAt) return false;
+          if (issueFilterStatus === "Pending" || issueFilterStatus === "pending_distribution") {
+            if (bi.status !== "pending_distribution") return false;
+          }
+          if (issueFilterStatus === "Issued" || issueFilterStatus === "issued") {
+            if (bi.status !== "issued") return false;
+          }
           return true;
         });
 
         return (
           <div>
-            {/* 4 SUMMARY TILES */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '20px' }}>
+            {/* 4 SUMMARY TILES (FIX 2) */}
+            <div style={{ display: 'grid', gridTemplateColumns: isMobileState ? '1fr' : 'repeat(4, 1fr)', gap: '16px', marginBottom: '20px' }}>
               <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
-                <div style={{ fontSize: '26px', fontWeight: 800, color: '#2B6CB0', fontFamily: "'Sora',sans-serif" }}>{currentlyIssuedCount}</div>
+                <div style={{ fontSize: '26px', fontWeight: 800, color: '#4F46E5', fontFamily: "'Sora',sans-serif" }}>{totalIssued}</div>
                 <div style={{ fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>Total Books Issued</div>
               </div>
               <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
-                <div style={{ fontSize: '26px', fontWeight: 800, color: '#C53030', fontFamily: "'Sora',sans-serif" }}>{overdueCount}</div>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>Overdue Books</div>
+                <div style={{ fontSize: '26px', fontWeight: 800, color: pendingDistribution > 0 ? '#C53030' : '#B7860A', fontFamily: "'Sora',sans-serif" }}>{pendingDistribution}</div>
+                <div style={{ fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>Pending Distribution</div>
               </div>
               <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
-                <div style={{ fontSize: '26px', fontWeight: 800, color: '#2F855A', fontFamily: "'Sora',sans-serif" }}>{returnedThisMonthCount}</div>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>Returned This Month</div>
+                <div style={{ fontSize: '26px', fontWeight: 800, color: '#276749', fontFamily: "'Sora',sans-serif" }}>{issuedThisMonth}</div>
+                <div style={{ fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>Issued This Month</div>
               </div>
               <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
-                <div style={{ fontSize: '26px', fontWeight: 800, color: '#2D3748', fontFamily: "'Sora',sans-serif" }}>{distinctStudentsCount}</div>
+                <div style={{ fontSize: '26px', fontWeight: 800, color: '#2B6CB0', fontFamily: "'Sora',sans-serif" }}>{distinctStudentsCount}</div>
                 <div style={{ fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>Students with Books</div>
               </div>
             </div>
@@ -679,7 +744,7 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                   <Users size={18} style={{ color: theme.accent }} /> Student Book Distribution Log
                 </span>
 
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <select
                     value={issueFilterBatch}
                     onChange={(e) => setIssueFilterBatch(e.target.value)}
@@ -704,9 +769,8 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                     style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #CBD5E0', fontSize: '12px' }}
                   >
                     <option value="All">All Statuses</option>
-                    <option value="Issued">Currently Issued</option>
-                    <option value="Overdue">Overdue</option>
-                    <option value="Returned">Returned</option>
+                    <option value="pending_distribution">Pending Distribution</option>
+                    <option value="issued">Issued</option>
                   </select>
 
                   {role === "Admin" && (
@@ -733,6 +797,7 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                 </div>
               </div>
 
+              {/* STUDENT BOOK DISTRIBUTION LOG TABLE (FIX 1) */}
               <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
                 <table style={{ minWidth: "600px", width: "100%", borderCollapse: "collapse" }}>
                   <thead>
@@ -742,16 +807,14 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                       <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Subject</th>
                       <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Batch</th>
                       <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Issued On</th>
-                      <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Due Date</th>
+                      <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Issued By</th>
                       <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Status</th>
-                      <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Actions</th>
+                      <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredIssues.map((iss) => {
-                      const isReturned = !!iss.returnedAt;
-                      const isOverdue = !isReturned && iss.dueDate && iss.dueDate < nowStr;
-
+                      const isPending = iss.status === "pending_distribution";
                       const subjObj = data.subjects.find((s) => s.id === iss.subjectId);
                       const subjCode = iss.subjectCode || subjObj?.code || 'BS';
 
@@ -777,43 +840,46 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                             {iss.batchName}
                           </td>
                           <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
-                            {iss.issuedAt}
+                            {iss.issuedOn || "—"}
                           </td>
                           <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
-                            {iss.dueDate || "—"}
+                            {iss.issuedBy || "Staff"}
                           </td>
                           <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
-                            {isReturned ? (
-                              <span style={{ background: theme.successLight, color: theme.success, border: '1px solid ' + theme.successBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
-                                Returned ({iss.returnedAt})
-                              </span>
-                            ) : isOverdue ? (
-                              <span style={{ background: theme.dangerLight, color: theme.danger, border: '1px solid ' + theme.dangerBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
-                                Overdue
+                            {isPending ? (
+                              <span style={{ background: '#FEF3C7', color: '#B7860A', border: '1px solid #F6D860', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
+                                ⏳ Pending
                               </span>
                             ) : (
-                              <span style={{ background: '#EBF4FF', color: '#2B6CB0', border: '1px solid #BEE3F8', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
-                                Issued
+                              <span style={{ background: '#F0FFF4', color: '#276749', border: '1px solid #9AE6B4', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
+                                ✓ Issued
                               </span>
                             )}
                           </td>
                           <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
-                            <div style={{ display: 'flex', gap: '6px' }}>
-                              {!isReturned && (
-                                <button
-                                  onClick={() => handleMarkReturned(iss.id)}
-                                  style={{ background: '#2F855A', color: '#FFFFFF', border: 'none', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
-                                >
-                                  Mark Returned
-                                </button>
-                              )}
+                            {isPending ? (
+                              <button
+                                onClick={() => handleMarkIssued(iss.id)}
+                                style={{
+                                  padding: '5px 12px', background: '#4F46E5', color: 'white',
+                                  border: 'none', borderRadius: '6px', fontSize: '11px',
+                                  fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px'
+                                }}
+                              >
+                                <Check size={12} /> Mark Issued
+                              </button>
+                            ) : (
                               <button
                                 onClick={() => setSelectedIssueDetail(iss)}
-                                style={{ background: '#FFFFFF', color: '#4A5568', border: '1px solid #CBD5E0', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                                style={{
+                                  padding: '5px 12px', background: 'transparent', color: '#718096',
+                                  border: '1px solid #E3E6EA', borderRadius: '6px', fontSize: '11px',
+                                  fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px'
+                                }}
                               >
-                                View
+                                <Eye size={12} /> View
                               </button>
-                            </div>
+                            )}
                           </td>
                         </tr>
                       );
@@ -825,7 +891,8 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
           </div>
         );
       })()}
-            {/* Submit Requisition Modal */}
+
+      {/* Submit Requisition Modal */}
       {showReqModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
           <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "500px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
@@ -851,10 +918,8 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                   value={reqForm.bookTitle}
                   onChange={(e) => setReqForm({ ...reqForm, bookTitle: e.target.value })}
                   style={{
-                    width: "100%", padding: "9px 36px 9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", appearance: "none", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", cursor: "pointer", transition: "border-color 0.15s, box-shadow 0.15s", boxSizing: "border-box"
+                    width: "100%", padding: "9px 36px 9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", cursor: "pointer", boxSizing: "border-box"
                   }}
-                  onFocus={e => { e.target.style.borderColor = "#2B6CB0"; e.target.style.boxShadow = "0 0 0 3px rgba(43,108,176,0.12)"; }}
-                  onBlur={e => { e.target.style.borderColor = "#E3E6EA"; e.target.style.boxShadow = "none"; }}
                 >
                   {data.books.map((b) => (<option key={b.id} value={b.title}>{b.title} ({b.subject})</option>))}
                 </select>
@@ -865,10 +930,8 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                   value={reqForm.batch}
                   onChange={(e) => setReqForm({ ...reqForm, batch: e.target.value })}
                   style={{
-                    width: "100%", padding: "9px 36px 9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", appearance: "none", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", cursor: "pointer", transition: "border-color 0.15s, box-shadow 0.15s", boxSizing: "border-box"
+                    width: "100%", padding: "9px 36px 9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", cursor: "pointer", boxSizing: "border-box"
                   }}
-                  onFocus={e => { e.target.style.borderColor = "#2B6CB0"; e.target.style.boxShadow = "0 0 0 3px rgba(43,108,176,0.12)"; }}
-                  onBlur={e => { e.target.style.borderColor = "#E3E6EA"; e.target.style.boxShadow = "none"; }}
                 >
                   {data.batches.map((bt) => (<option key={bt.id} value={bt.name}>{bt.name}</option>))}
                 </select>
@@ -881,10 +944,8 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                   value={reqForm.quantity}
                   onChange={(e) => setReqForm({ ...reqForm, quantity: e.target.value })}
                   style={{
-                    width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", transition: "border-color 0.15s, box-shadow 0.15s", boxSizing: "border-box"
+                    width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", boxSizing: "border-box"
                   }}
-                  onFocus={e => { e.target.style.borderColor = "#2B6CB0"; e.target.style.boxShadow = "0 0 0 3px rgba(43,108,176,0.12)"; }}
-                  onBlur={e => { e.target.style.borderColor = "#E3E6EA"; e.target.style.boxShadow = "none"; }}
                 />
               </div>
               <div style={{ marginBottom: "16px" }}>
@@ -895,10 +956,8 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                   value={reqForm.dateNeeded}
                   onChange={(e) => setReqForm({ ...reqForm, dateNeeded: e.target.value })}
                   style={{
-                    width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", transition: "border-color 0.15s, box-shadow 0.15s", boxSizing: "border-box"
+                    width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", boxSizing: "border-box"
                   }}
-                  onFocus={e => { e.target.style.borderColor = "#2B6CB0"; e.target.style.boxShadow = "0 0 0 3px rgba(43,108,176,0.12)"; }}
-                  onBlur={e => { e.target.style.borderColor = "#E3E6EA"; e.target.style.boxShadow = "none"; }}
                 />
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "24px", paddingTop: "18px", borderTop: "1px solid #F4F5F7" }}>
@@ -930,7 +989,7 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                   value={bookForm.title}
                   onChange={(e) => setBookForm({ ...bookForm, title: e.target.value })}
                   style={{
-                    width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", transition: "border-color 0.15s, box-shadow 0.15s", boxSizing: "border-box"
+                    width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none", fontFamily: "'Inter', 'Segoe UI', sans-serif", boxSizing: "border-box"
                   }}
                 />
               </div>
@@ -1007,7 +1066,7 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
         </div>
       )}
 
-      {/* Issue Book Modal */}
+      {/* Issue Book Modal (FIX 3 - Removed Due Date) */}
       {showIssueModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
           <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "520px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
@@ -1067,40 +1126,14 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                 </select>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: "16px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Issue Date</label>
-                  <input
-                    type="date"
-                    value={issueForm.issuedAt}
-                    onChange={(e) => setIssueForm({ ...issueForm, issuedAt: e.target.value })}
-                    style={{ width: "100%", padding: "9px 13px", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Due Date</label>
-                  <input
-                    type="date"
-                    value={issueForm.dueDate}
-                    onChange={(e) => setIssueForm({ ...issueForm, dueDate: e.target.value })}
-                    style={{ width: "100%", padding: "9px 13px", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px" }}
-                  />
-                </div>
-              </div>
-
               <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Condition at Issue</label>
-                <select
-                  value={issueForm.condition || "Good"}
-                  onChange={(e) => setIssueForm({ ...issueForm, condition: e.target.value })}
-                  style={{
-                    width: "100%", padding: "9px 13px", background: "#FFFFFF", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", color: "#1A202C", outline: "none"
-                  }}
-                >
-                  <option value="Good">Good</option>
-                  <option value="Fair">Fair</option>
-                  <option value="Damaged">Damaged</option>
-                </select>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Issued On</label>
+                <input
+                  type="date"
+                  value={issueForm.issuedOn}
+                  onChange={(e) => setIssueForm({ ...issueForm, issuedOn: e.target.value })}
+                  style={{ width: "100%", padding: "9px 13px", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px" }}
+                />
               </div>
 
               <div style={{ marginBottom: "16px" }}>
@@ -1119,6 +1152,42 @@ export const BookManagementView = ({ initialTab = "catalogue", isMobile }) => {
                 <button type="submit" style={{ background: 'linear-gradient(135deg, #2B6CB0, #1A4A8A)', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(43,108,176,0.30)' }}>Issue Book</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Selected Issue Detail Modal */}
+      {selectedIssueDetail && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: isMobileState ? "16px" : "28px", width: isMobileState ? "95vw" : "480px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.20)", position: "relative" }}>
+            <button
+              onClick={() => setSelectedIssueDetail(null)}
+              style={{ position: "absolute", top: "16px", right: "16px", width: "32px", height: "32px", borderRadius: "8px", background: "#F4F5F7", border: "none", cursor: "pointer", fontSize: "18px", color: "#718096", display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              ×
+            </button>
+            <h3 style={{ fontFamily: "'Sora',sans-serif", fontSize: "18px", fontWeight: 700, color: "#1A202C", marginBottom: "16px" }}>Book Issue Details</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px', color: '#2D3748' }}>
+              <div><strong>Student:</strong> {selectedIssueDetail.studentName}</div>
+              <div><strong>Book Title:</strong> {selectedIssueDetail.bookTitle}</div>
+              <div><strong>Batch:</strong> {selectedIssueDetail.batchName}</div>
+              <div><strong>Issued On:</strong> {selectedIssueDetail.issuedOn || "—"}</div>
+              <div><strong>Issued By:</strong> {selectedIssueDetail.issuedBy || "Staff"}</div>
+              <div>
+                <strong>Status: </strong>
+                {selectedIssueDetail.status === "pending_distribution" ? (
+                  <span style={{ background: '#FEF3C7', color: '#B7860A', border: '1px solid #F6D860', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>⏳ Pending</span>
+                ) : (
+                  <span style={{ background: '#F0FFF4', color: '#276749', border: '1px solid #9AE6B4', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>✓ Issued</span>
+                )}
+              </div>
+              {selectedIssueDetail.notes && (
+                <div><strong>Notes:</strong> {selectedIssueDetail.notes}</div>
+              )}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "24px", paddingTop: "16px", borderTop: "1px solid #F4F5F7" }}>
+              <button onClick={() => setSelectedIssueDetail(null)} style={{ background: "#FFFFFF", color: theme.textSecondary, border: "1px solid #E3E6EA", borderRadius: "8px", padding: "8px 16px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Close</button>
+            </div>
           </div>
         </div>
       )}
