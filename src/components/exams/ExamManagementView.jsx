@@ -85,6 +85,143 @@ export const ExamManagementView = ({ isMobile }) => {
     setExamSchedule(safeLS('pba_exam_schedule', []));
   }, []);
 
+  // Exam results
+  const [examResults, setExamResults] = useState(
+    () => safeLS('pba_exam_results', [])
+  );
+  useEffect(() => {
+    setExamResults(safeLS('pba_exam_results', []));
+  }, []);
+
+  // Mark Entry selectors
+  const [markExamSessionId, setMarkExamSessionId] = useState('');
+  const [markSubjectId, setMarkSubjectId] = useState('');
+  const [markPaperNumber, setMarkPaperNumber] = useState('');
+
+  // Import modal state
+  const [showMarkImport, setShowMarkImport] = useState(false);
+  const [markImportRows, setMarkImportRows] = useState([]);
+  const [markImportError, setMarkImportError] = useState('');
+  const [markToast, setMarkToast] = useState(false);
+
+  const calcGrade = (pct) => {
+    if (pct === null || pct === undefined) return 'ABS';
+    if (pct >= 90) return 'A*';
+    if (pct >= 80) return 'A';
+    if (pct >= 70) return 'B';
+    if (pct >= 60) return 'C';
+    if (pct >= 50) return 'D';
+    if (pct >= 40) return 'E';
+    return 'U';
+  };
+
+  const gradeColor = (grade) => {
+    if (!grade || grade === 'ABS') return '#9CA3AF';
+    if (grade === 'A*' || grade === 'A') return '#059669';
+    if (grade === 'B' || grade === 'C') return '#2563EB';
+    if (grade === 'D' || grade === 'E') return '#D97706';
+    return '#DC2626';
+  };
+
+  // Build mark sheet rows: students from pba_students + saved results
+  const buildMarkSheet = (examSessionId, batchId, subjectId, paperNumber) => {
+    const students = (safeLS('pba_students', []) || [])
+      .filter(s => s.batchId === batchId)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    const paperRec = (examSchedule || []).find(r =>
+      r.examSessionId === examSessionId &&
+      r.subjectId === subjectId &&
+      Number(r.paperNumber) === Number(paperNumber)
+    );
+    const totalMks = paperRec?.totalMarks || 100;
+    const passMks  = paperRec?.passMarks  || 40;
+    return (students || []).map(student => {
+      const saved = (safeLS('pba_exam_results', []) || []).find(r =>
+        r.examSessionId === examSessionId &&
+        r.subjectId === subjectId &&
+        Number(r.paperNumber) === Number(paperNumber) &&
+        r.studentId === student.id
+      );
+      const rawMarks = saved?.rawMarks ?? null;
+      const absent   = saved?.absent ?? false;
+      const pct = (!absent && rawMarks !== null && rawMarks !== '')
+        ? Math.round((parseFloat(rawMarks) / totalMks) * 1000) / 10
+        : null;
+      return {
+        studentId:   student.id,
+        studentName: student.name || '—',
+        studentRegNo: student.regNo || student.id || '',
+        rawMarks,
+        percentage: pct,
+        grade:      absent ? 'ABS' : calcGrade(pct),
+        isPassed:   !absent && rawMarks !== null && parseFloat(rawMarks) >= passMks,
+        absent,
+        totalMarks: totalMks,
+        passMarks:  passMks
+      };
+    });
+  };
+
+  // Upsert a mark cell
+  const saveMarkCell = (examSessionId, subjectId, paperNum,
+                        studentId, field, value) => {
+    const paperRec = (examSchedule || []).find(r =>
+      r.examSessionId === examSessionId &&
+      r.subjectId === subjectId &&
+      Number(r.paperNumber) === Number(paperNum)
+    );
+    const totalMks = paperRec?.totalMarks || 100;
+    const passMks  = paperRec?.passMarks  || 40;
+    const now = new Date().toISOString();
+    const existing = safeLS('pba_exam_results', []);
+    const idx = (existing || []).findIndex(r =>
+      r.examSessionId === examSessionId &&
+      r.subjectId === subjectId &&
+      Number(r.paperNumber) === Number(paperNum) &&
+      r.studentId === studentId
+    );
+    let base = idx >= 0
+      ? { ...(existing[idx]) }
+      : {
+          id: `result_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+          examSessionId,
+          examSessionName: paperRec?.examSessionName || '',
+          batchId:    paperRec?.batchId    || '',
+          batchName:  paperRec?.batchName  || '',
+          subjectId,
+          subjectCode: paperRec?.subjectCode || '',
+          subjectName: paperRec?.subjectName || '',
+          paperNumber: Number(paperNum),
+          paperName:   paperRec?.paperName || `Paper ${paperNum}`,
+          totalMarks:  totalMks,
+          passMarks:   passMks,
+          studentId,
+          studentName: '',
+          rawMarks:    null,
+          percentage:  null,
+          grade:       '—',
+          isPassed:    false,
+          absent:      false,
+          enteredAt:   now
+        };
+    base[field] = value;
+    base.updatedAt = now;
+    if (base.absent) {
+      base.rawMarks = null; base.percentage = null;
+      base.grade = 'ABS'; base.isPassed = false;
+    } else if (base.rawMarks !== null && base.rawMarks !== '') {
+      const n = parseFloat(base.rawMarks);
+      base.percentage = Math.round((n / totalMks) * 1000) / 10;
+      base.grade = calcGrade(base.percentage);
+      base.isPassed = n >= passMks;
+    }
+    const updated = idx >= 0
+      ? (existing || []).map((r, i) => i === idx ? base : r)
+      : [...(existing || []), base];
+    saveLS('pba_exam_results', updated);
+    setExamResults(updated);
+  };
+
   const emptyPaper = () => ({
     paperName: '',
     date: '',
@@ -1026,244 +1163,701 @@ export const ExamManagementView = ({ isMobile }) => {
       )}
 
       {/* SECTION 3 — MARK ENTRY TAB */}
-      {activeTab === "mark-entry" && (
-        <div>
-          {/* TOP SELECTOR ROW */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '6px' }}>
-              Select Examination Session for Mark Entry
-            </label>
-            <select
-              value={selectedExamId}
-              onChange={(e) => setSelectedExamId(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 36px 10px 13px',
-                background: '#FFFFFF',
-                border: '1.5px solid #E3E6EA',
-                borderRadius: '8px',
-                fontSize: '13px',
-                fontWeight: 600,
-                color: '#1A202C',
-                outline: 'none',
-                fontFamily: "'Inter', sans-serif",
-                appearance: 'none',
-                WebkitAppearance: 'none',
-                backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")",
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 12px center',
-                cursor: 'pointer'
-              }}
-            >
-              {(data.exams || []).map((ex) => {
-                const subjCode = ex.subjectCode || ex.subject?.substring(0, 3).toUpperCase() || "GEN";
-                return (
-                  <option key={ex.id} value={ex.id}>
-                    {subjCode} — {ex.name} ({ex.batch}) — {ex.date}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
+      {activeTab === "mark-entry" && (() => {
+        // Group pba_exam_schedule records by examSessionId
+        const examSessionGroups = (() => {
+          const map = {};
+          (examSchedule || []).forEach(r => {
+            if (!r.examSessionId) return;
+            if (!map[r.examSessionId]) {
+              map[r.examSessionId] = {
+                examSessionId:   r.examSessionId,
+                examSessionName: r.examSessionName || r.examSessionId,
+                batchId:         r.batchId,
+                batchName:       r.batchName || ''
+              };
+            }
+          });
+          return Object.values(map);
+        })();
 
-          {currentSelectedExam && (
-            <>
-              {/* MARK ENTRY PROGRESS BAR */}
-              <div style={{ marginBottom: '16px', background: '#FFFFFF', padding: '14px 18px', border: '1px solid #E3E6EA', borderRadius: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '12px', color: '#4A5568', fontWeight: 600 }}>
-                    Mark Entry Progress
-                  </span>
-                  <span style={{ fontSize: '12px', color: enteredMarksCount === currentBatchStudents.length ? '#2F855A' : '#2B6CB0', fontWeight: 700 }}>
-                    {enteredMarksCount} / {currentBatchStudents.length} students completed
+        // Subjects for the selected exam session
+        const markSubjects = (() => {
+          if (!markExamSessionId) return [];
+          const map = {};
+          (examSchedule || [])
+            .filter(r => r.examSessionId === markExamSessionId)
+            .forEach(r => {
+              if (!map[r.subjectId]) {
+                map[r.subjectId] = {
+                  subjectId:   r.subjectId,
+                  subjectCode: r.subjectCode || '',
+                  subjectName: r.subjectName || r.subjectId
+                };
+              }
+            });
+          return Object.values(map);
+        })();
+
+        // Papers for the selected subject
+        const markPapers = (() => {
+          if (!markExamSessionId || !markSubjectId) return [];
+          return (examSchedule || [])
+            .filter(r =>
+              r.examSessionId === markExamSessionId &&
+              r.subjectId === markSubjectId
+            )
+            .sort((a, b) => (a.paperNumber || 0) - (b.paperNumber || 0));
+        })();
+
+        // Active paper record (for totalMarks, passMarks, date, etc.)
+        const activePaperRec = (!markExamSessionId || !markSubjectId || !markPaperNumber)
+          ? null
+          : (examSchedule || []).find(r =>
+              r.examSessionId === markExamSessionId &&
+              r.subjectId === markSubjectId &&
+              Number(r.paperNumber) === Number(markPaperNumber)
+            );
+
+        // Active batch (comes from the exam session group)
+        const activeSessionGroup = (examSessionGroups || []).find(
+          g => g.examSessionId === markExamSessionId
+        );
+
+        // Build the mark sheet (only when all three are selected)
+        const markSheet = (markExamSessionId && markSubjectId && markPaperNumber && activePaperRec)
+          ? buildMarkSheet(
+              markExamSessionId,
+              activeSessionGroup?.batchId || '',
+              markSubjectId,
+              Number(markPaperNumber)
+            )
+          : [];
+
+        return (
+          <div>
+            {/* SELECTOR ROW */}
+            <div style={{
+              display: 'flex', gap: '12px', flexWrap: 'wrap',
+              marginBottom: '18px', alignItems: 'flex-end'
+            }}>
+              {/* Exam Session selector */}
+              <div style={{ flex: '1 1 260px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '6px' }}>
+                  Examination Session
+                </label>
+                <select
+                  value={markExamSessionId}
+                  onChange={e => {
+                    setMarkExamSessionId(e.target.value);
+                    setMarkSubjectId('');
+                    setMarkPaperNumber('');
+                  }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '13px',
+                    background: 'white', color: '#1A202C' }}>
+                  <option value="">— Select Session —</option>
+                  {(examSessionGroups || []).map(g => (
+                    <option key={g.examSessionId} value={g.examSessionId}>
+                      {g.examSessionName}{g.batchName ? ` — ${g.batchName}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {(examSessionGroups || []).length === 0 && (
+                  <p style={{ fontSize: '11px', color: '#D97706', marginTop: '5px', fontWeight: 600 }}>
+                    ⚠ No exam sessions found. Schedule exams first in the Exam Schedule tab.
+                  </p>
+                )}
+              </div>
+
+              {/* Subject selector */}
+              <div style={{ flex: '1 1 180px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '6px' }}>
+                  Subject
+                </label>
+                <select
+                  value={markSubjectId}
+                  onChange={e => {
+                    setMarkSubjectId(e.target.value);
+                    setMarkPaperNumber('');
+                  }}
+                  disabled={!markExamSessionId}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '13px',
+                    background: !markExamSessionId ? '#F9FAFB' : 'white',
+                    color: '#1A202C' }}>
+                  <option value="">— Select Subject —</option>
+                  {(markSubjects || []).map(s => (
+                    <option key={s.subjectId} value={s.subjectId}>
+                      {s.subjectCode ? `${s.subjectCode} — ` : ''}{s.subjectName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Paper selector */}
+              <div style={{ flex: '1 1 160px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '6px' }}>
+                  Paper
+                </label>
+                <select
+                  value={markPaperNumber}
+                  onChange={e => setMarkPaperNumber(e.target.value)}
+                  disabled={!markSubjectId}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '13px',
+                    background: !markSubjectId ? '#F9FAFB' : 'white',
+                    color: '#1A202C' }}>
+                  <option value="">— Select Paper —</option>
+                  {(markPapers || []).map(p => (
+                    <option key={p.paperNumber} value={p.paperNumber}>
+                      {p.paperName || `Paper ${p.paperNumber}`}
+                      {p.totalMarks ? ` (/${p.totalMarks})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Paper meta — show date/time/venue when paper is selected */}
+            {activePaperRec && (
+              <div style={{ marginBottom: '14px', padding: '10px 14px',
+                background: '#F0F4FF', border: '1px solid #C7D2FE',
+                borderRadius: '8px', fontSize: '12px', color: '#374151' }}>
+                📅 <strong>{activePaperRec.date || '—'}</strong>
+                &nbsp;·&nbsp;
+                🕐 {activePaperRec.startTime || '—'}–{activePaperRec.endTime || '—'}
+                &nbsp;·&nbsp;
+                Max marks: <strong>{activePaperRec.totalMarks || '—'}</strong>
+                &nbsp;·&nbsp;
+                Pass mark: <strong>{activePaperRec.passMarks || '—'}</strong>
+                {activePaperRec.venue
+                  ? <>&nbsp;·&nbsp;📍 {activePaperRec.venue}</>
+                  : null}
+              </div>
+            )}
+
+            {/* Progress bar — only show when all three selectors are set */}
+            {markExamSessionId && markSubjectId && markPaperNumber && (
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between',
+                  fontSize: '12px', color: '#374151', fontWeight: 600,
+                  marginBottom: '6px' }}>
+                  <span>Mark Entry Progress</span>
+                  <span>
+                    {(markSheet || []).filter(r => r.rawMarks !== null || r.absent).length}
+                    /{(markSheet || []).length} students completed
                   </span>
                 </div>
-                <div style={{ background: '#E3E6EA', borderRadius: '20px', height: '8px', overflow: 'hidden' }}>
+                <div style={{ height: '8px', background: '#E5E7EB', borderRadius: '4px',
+                  overflow: 'hidden' }}>
                   <div style={{
-                    background: enteredMarksCount === currentBatchStudents.length ? '#2F855A' : '#2B6CB0',
-                    width: `${currentBatchStudents.length > 0 ? (enteredMarksCount / currentBatchStudents.length) * 100 : 0}%`,
-                    borderRadius: '20px', height: '8px',
-                    transition: 'width 0.3s ease'
+                    height: '100%', borderRadius: '4px',
+                    background: 'linear-gradient(90deg, #4F46E5 0%, #7C3AED 100%)',
+                    width: (markSheet || []).length > 0
+                      ? `${Math.round(
+                          (markSheet || []).filter(r => r.rawMarks !== null || r.absent).length
+                          / (markSheet || []).length * 100
+                        )}%`
+                      : '0%',
+                    transition: 'width 0.3s'
                   }} />
                 </div>
               </div>
+            )}
 
-              {/* PERMISSION NOTICE BANNER IF NOT PERMITTED */}
-              {!canEnterMarks && (
-                <div style={{ background: '#FFF5F5', border: '1px solid #FEB2B2', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', color: '#C53030', fontSize: '13px', fontWeight: 600 }}>
-                  ⚠️ Access Restricted: Only the assigned Main Lecturer ({currentAssignment?.mainLecturerName || 'Unassigned'}), Assistant Lecturer ({currentAssignment?.assistantLecturerName || 'None'}), or Admin can enter or edit marks for this examination.
-                </div>
-              )}
-
-              {/* IMPORT MARKS BUTTON ROW */}
-              <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
-                <label style={{
-                  padding: '8px 16px',
-                  background: '#FFFFFF',
-                  border: '1.5px solid #E3E6EA',
-                  borderRadius: '8px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: canEnterMarks ? '#4A5568' : '#A0AEC0',
-                  cursor: canEnterMarks ? 'pointer' : 'not-allowed',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '7px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                  opacity: canEnterMarks ? 1 : 0.6
-                }}>
-                  <Upload size={14} style={{ color: canEnterMarks ? '#2B6CB0' : '#A0AEC0' }} /> Import from CSV / Excel
-                  <input
-                    type="file"
-                    accept=".csv, .xlsx, .xls"
-                    disabled={!canEnterMarks}
-                    onChange={handleFileImportChange}
-                    style={{ display: 'none' }}
-                  />
-                </label>
-
-                <button
-                  onClick={handleDownloadTemplate}
-                  style={{
-                    padding: '8px 16px',
-                    background: '#FFFFFF',
-                    border: '1.5px solid #E3E6EA',
-                    borderRadius: '8px',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: '#4A5568',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '7px',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-                  }}
-                >
-                  <Download size={14} style={{ color: '#2F855A' }} /> Download CSV Template
-                </button>
-              </div>
-
-              {/* MARK ENTRY TABLE */}
-              <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', overflow: 'hidden', marginBottom: '20px' }}>
-                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                  <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: '#F8F9FA' }}>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left', width: '50px' }}>#</th>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left' }}>Student Name</th>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left' }}>Student ID</th>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'left', width: '160px' }}>Marks Obtained</th>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'center', width: '100px' }}>Absent</th>
-                        <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid #E3E6EA', textAlign: 'center', width: '80px' }}>Grade</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {currentBatchStudents.map((st, idx) => {
-                        const entry = markEntryState[st.id] || { marksObtained: null, isAbsent: false };
-                        const isAbs = !!entry.isAbsent;
-                        const markVal = entry.marksObtained;
-                        const grade = isAbs ? "ABS" : calcGrade(markVal, currentSelectedExam.totalMarks || 100);
-                        const gStyle = gradeColor(grade);
-
-                        return (
-                          <tr key={st.id} style={{ borderBottom: '1px solid #F4F5F7', background: isAbs ? '#FAFAFA' : '#FFFFFF' }}>
-                            <td style={{ padding: '12px 16px', fontSize: '12px', color: '#718096', fontWeight: 600 }}>{idx + 1}</td>
-                            <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 700, color: '#1A202C' }}>{st.name}</td>
-                            <td style={{ padding: '12px 16px', fontSize: '12px', fontFamily: 'monospace', color: '#2B6CB0', fontWeight: 600 }}>{st.regNo}</td>
-                            <td style={{ padding: '12px 16px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max={currentSelectedExam.totalMarks || 100}
-                                  disabled={isAbs || !canEnterMarks}
-                                  value={isAbs ? "" : (markVal ?? "")}
-                                  onChange={(e) => handleUpdateStudentMark(st.id, e.target.value)}
-                                  placeholder="0 - 100"
-                                  style={{
-                                    width: '100px',
-                                    padding: '7px 10px',
-                                    background: (isAbs || !canEnterMarks) ? '#EDF2F7' : '#FFFFFF',
-                                    border: '1.5px solid #E3E6EA',
-                                    borderRadius: '7px',
-                                    fontSize: '13px',
-                                    fontWeight: 600,
-                                    color: '#1A202C',
-                                    textAlign: 'right',
-                                    outline: 'none'
-                                  }}
-                                />
-                                <span style={{ fontSize: '11px', color: '#718096' }}>/ {currentSelectedExam.totalMarks || 100}</span>
-                              </div>
-                            </td>
-                            <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: canEnterMarks ? 'pointer' : 'not-allowed' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={isAbs}
-                                  disabled={!canEnterMarks}
-                                  onChange={(e) => handleToggleAbsent(st.id, e.target.checked)}
-                                  style={{ width: '16px', height: '16px', accentColor: '#C53030' }}
-                                />
-                                <span style={{ fontSize: '12px', color: isAbs ? '#C53030' : '#718096', fontWeight: isAbs ? 700 : 500 }}>Absent</span>
-                              </label>
-                            </td>
-                            <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                              <span style={{
-                                background: gStyle.bg,
-                                color: gStyle.color,
-                                border: `1px solid ${gStyle.border}`,
-                                padding: '3px 10px',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                fontWeight: 700
-                              }}>
-                                {grade}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {currentBatchStudents.length === 0 && (
-                        <tr>
-                          <td colSpan="6" style={{ padding: '30px', textAlign: 'center', color: '#A0AEC0', fontSize: '13px' }}>
-                            No active students found in batch "{currentSelectedExam.batch}".
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* SAVE MARKS BUTTON */}
+            {/* Action buttons row (Import + Download Template) */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '16px',
+              flexWrap: 'wrap' }}>
               <button
-                onClick={handleSaveMarkEntry}
-                disabled={!canEnterMarks}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  background: canEnterMarks ? 'linear-gradient(135deg, #2B6CB0, #1A4A8A)' : '#CBD5E0',
-                  color: '#FFFFFF',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: 700,
-                  cursor: canEnterMarks ? 'pointer' : 'not-allowed',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  boxShadow: canEnterMarks ? '0 2px 10px rgba(43,108,176,0.30)' : 'none',
-                  fontFamily: "'Inter', sans-serif"
+                disabled={!markPaperNumber}
+                onClick={() => {
+                  if (!markPaperNumber) return;
+                  setMarkImportRows([]);
+                  setMarkImportError('');
+                  setShowMarkImport(true);
                 }}
-              >
-                <CheckCircle2 size={18} /> Save All Marks to Registry
+                style={{ padding: '8px 16px', borderRadius: '8px',
+                  border: `1px solid ${markPaperNumber ? '#4F46E5' : '#E3E6EA'}`,
+                  background: markPaperNumber ? '#EEF2FF' : '#F9FAFB',
+                  color: markPaperNumber ? '#4F46E5' : '#9CA3AF',
+                  fontSize: '13px', fontWeight: 700,
+                  cursor: markPaperNumber ? 'pointer' : 'not-allowed' }}>
+                ↑ Import from CSV / Excel
               </button>
-            </>
-          )}
-        </div>
-      )}
+
+              <button
+                disabled={!markPaperNumber}
+                onClick={() => {
+                  if (!markPaperNumber || !activeSessionGroup?.batchId) return;
+                  const students = (safeLS('pba_students', []) || [])
+                    .filter(s => s.batchId === activeSessionGroup.batchId)
+                    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                  const paperLabel = activePaperRec?.paperName || `Paper_${markPaperNumber}`;
+                  const header = 'Student Name,Student ID,Raw Marks,Absent';
+                  const rows   = (students || []).map(s => `${s.name || ''},${s.id || ''},,`);
+                  const csv    = [header, ...rows].join('\n');
+                  const blob   = new Blob([csv], { type: 'text/csv' });
+                  const url    = URL.createObjectURL(blob);
+                  const a      = document.createElement('a');
+                  a.href = url; a.download = `marks_template_${paperLabel}.csv`;
+                  a.click(); URL.revokeObjectURL(url);
+                }}
+                style={{ padding: '8px 16px', borderRadius: '8px',
+                  border: `1px solid ${markPaperNumber ? '#059669' : '#E3E6EA'}`,
+                  background: markPaperNumber ? '#ECFDF5' : '#F9FAFB',
+                  color: markPaperNumber ? '#059669' : '#9CA3AF',
+                  fontSize: '13px', fontWeight: 700,
+                  cursor: markPaperNumber ? 'pointer' : 'not-allowed' }}>
+                ↓ Download CSV Template
+              </button>
+            </div>
+
+            {/* STUDENT MARK TABLE */}
+            <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', overflow: 'hidden', marginBottom: '20px' }}>
+              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                <table style={{ minWidth: '600px', width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#F8F9FA' }}>
+                      <th style={{ padding: '10px 14px', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', textAlign: 'left', width: '50px' }}>#</th>
+                      <th style={{ padding: '10px 14px', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', textAlign: 'left' }}>STUDENT NAME</th>
+                      <th style={{ padding: '10px 14px', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', textAlign: 'left' }}>STUDENT ID</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', width: '160px' }}>
+                        MARKS OBTAINED
+                        <div style={{ fontSize: '9px', color: '#9CA3AF', fontWeight: 500, textTransform: 'none', marginTop: '2px' }}>
+                          out of {activePaperRec?.totalMarks || '—'}
+                        </div>
+                      </th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', width: '80px' }}>%</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', width: '90px' }}>ABSENT</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', width: '80px' }}>GRADE</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(markExamSessionId && markSubjectId && markPaperNumber)
+                      ? (markSheet || []).length > 0
+                        ? (markSheet || []).map((row, idx) => (
+                            <tr key={row.studentId}
+                              style={{
+                                borderBottom: '1px solid #F1F5F9',
+                                background: row.absent     ? '#FFFBEB'
+                                  : row.isPassed           ? '#F0FDF4'
+                                  : row.rawMarks !== null  ? '#FFF5F5'
+                                  : idx % 2 === 0         ? 'white' : '#FAFAFA'
+                              }}>
+                              {/* # */}
+                              <td style={{ padding: '8px 14px', fontSize: '12px', color: '#9CA3AF', fontWeight: 600 }}>{idx + 1}</td>
+                              {/* NAME */}
+                              <td style={{ padding: '8px 14px', fontSize: '13px', fontWeight: 700, color: '#1A202C' }}>{row.studentName}</td>
+                              {/* ID / REG NO */}
+                              <td style={{ padding: '8px 14px', fontSize: '12px', color: '#6B7280' }}>{row.studentRegNo || '—'}</td>
+                              {/* MARKS input */}
+                              <td style={{ padding: '6px 14px', textAlign: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={activePaperRec?.totalMarks || 100}
+                                    step={0.5}
+                                    disabled={row.absent}
+                                    value={row.rawMarks !== null && row.rawMarks !== undefined ? row.rawMarks : ''}
+                                    placeholder="—"
+                                    onChange={e => {
+                                      const val = e.target.value === '' ? null : parseFloat(e.target.value);
+                                      saveMarkCell(
+                                        markExamSessionId, markSubjectId,
+                                        Number(markPaperNumber), row.studentId, 'rawMarks', val
+                                      );
+                                    }}
+                                    style={{ width: '72px', padding: '6px 8px', borderRadius: '6px', textAlign: 'center', border: '1px solid #E3E6EA', fontSize: '14px', fontWeight: 700, background: row.absent ? '#F9FAFB' : 'white', color: row.absent ? '#9CA3AF' : '#1A202C' }}
+                                  />
+                                  <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
+                                    /{activePaperRec?.totalMarks || '?'}
+                                  </span>
+                                </div>
+                              </td>
+                              {/* PERCENTAGE */}
+                              <td style={{ padding: '8px 14px', textAlign: 'center', fontSize: '13px', fontWeight: 700, color: row.absent ? '#9CA3AF' : row.percentage !== null ? (row.percentage >= (activePaperRec?.passMarks ? (activePaperRec.passMarks / (activePaperRec.totalMarks||100))*100 : 40) ? '#059669' : '#DC2626') : '#D1D5DB' }}>
+                                {row.absent ? 'ABS' : row.percentage !== null ? `${row.percentage}%` : '—'}
+                              </td>
+                              {/* ABSENT */}
+                              <td style={{ padding: '8px 14px', textAlign: 'center' }}>
+                                <input type="checkbox"
+                                  checked={row.absent || false}
+                                  onChange={e => {
+                                    saveMarkCell(
+                                      markExamSessionId, markSubjectId,
+                                      Number(markPaperNumber), row.studentId, 'absent', e.target.checked
+                                    );
+                                  }}
+                                  style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#D97706' }}
+                                />
+                              </td>
+                              {/* GRADE */}
+                              <td style={{ padding: '8px 14px', textAlign: 'center' }}>
+                                <span style={{
+                                  display: 'inline-block', padding: '3px 10px',
+                                  borderRadius: '12px', fontSize: '12px', fontWeight: 800,
+                                  background:
+                                    row.grade === 'A*' || row.grade === 'A' ? '#D1FAE5'
+                                    : row.grade === 'B' || row.grade === 'C' ? '#DBEAFE'
+                                    : row.grade === 'D' || row.grade === 'E' ? '#FEF3C7'
+                                    : row.grade === 'ABS' ? '#F3F4F6'
+                                    : '#FEE2E2',
+                                  color: gradeColor(row.grade)
+                                }}>
+                                  {row.grade || '—'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        : (
+                          <tr><td colSpan={7} style={{ padding: '40px', textAlign: 'center', color: '#9CA3AF', fontSize: '13px' }}>
+                            No students enrolled in this batch yet.
+                          </td></tr>
+                        )
+                      : (
+                        <tr><td colSpan={7} style={{ padding: '40px', textAlign: 'center', color: '#9CA3AF', fontSize: '13px' }}>
+                          Select a session, subject, and paper above to load the mark sheet.
+                        </td></tr>
+                      )
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* SAVE ALL MARKS BUTTON */}
+            <button
+              onClick={() => {
+                setMarkToast(true);
+                setTimeout(() => setMarkToast(false), 2500);
+              }}
+              disabled={!markPaperNumber || (markSheet || []).length === 0}
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: (!markPaperNumber || (markSheet || []).length === 0)
+                  ? '#CBD5E0'
+                  : 'linear-gradient(135deg, #4F46E5, #7C3AED)',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontWeight: 700,
+                cursor: (!markPaperNumber || (markSheet || []).length === 0) ? 'not-allowed' : 'pointer'
+              }}
+            >
+              ✓ Save All Marks to Registry
+            </button>
+
+            {/* Save Confirmation Toast */}
+            {markToast && (
+              <div style={{
+                position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999,
+                background: '#D1FAE5', border: '1px solid #6EE7B7',
+                borderRadius: '12px', padding: '14px 18px',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.15)', color: '#065F46'
+              }}>
+                <div style={{ fontWeight: 800, fontSize: '13px' }}>✓ Marks saved to registry</div>
+                <div style={{ fontSize: '11px', color: '#047857', marginTop: '2px' }}>All cell updates are auto-saved to pba_exam_results</div>
+              </div>
+            )}
+
+            {/* BULK IMPORT MODAL */}
+            {showMarkImport && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+                zIndex: 3000, display: 'flex', alignItems: 'center',
+                justifyContent: 'center' }}>
+                <div style={{ background: 'white', borderRadius: '14px',
+                  width: '620px', maxHeight: '82vh', overflowY: 'auto',
+                  boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+
+                  {/* Header */}
+                  <div style={{ background: 'linear-gradient(135deg,#4F46E5,#7C3AED)',
+                    padding: '18px 24px', borderRadius: '14px 14px 0 0',
+                    display: 'flex', alignItems: 'center',
+                    justifyContent: 'space-between' }}>
+                    <div style={{ fontWeight: 800, fontSize: '15px', color: 'white' }}>
+                      ↑ Bulk Import Marks —{' '}
+                      {activePaperRec?.paperName || `Paper ${markPaperNumber}`}
+                    </div>
+                    <button onClick={() => setShowMarkImport(false)}
+                      style={{ background: 'rgba(255,255,255,0.15)', border: 'none',
+                        color: 'white', borderRadius: '6px', padding: '4px 12px',
+                        cursor: 'pointer', fontSize: '16px' }}>×</button>
+                  </div>
+
+                  <div style={{ padding: '20px 24px' }}>
+
+                    {/* Format instructions */}
+                    <div style={{ background: '#F0F4FF', border: '1px solid #C7D2FE',
+                      borderRadius: '10px', padding: '14px 16px', marginBottom: '16px',
+                      fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+                      <div style={{ fontWeight: 800, marginBottom: '6px' }}>
+                        📋 Required columns:
+                      </div>
+                      <div style={{ fontFamily: 'monospace', background: 'white',
+                        padding: '8px 10px', borderRadius: '6px',
+                        border: '1px solid #E3E6EA', fontSize: '11px' }}>
+                        Student Name | Raw Marks | Absent (optional)
+                      </div>
+                      <div style={{ marginTop: '8px', color: '#6B7280' }}>
+                        • CSV (.csv) or Excel (.xlsx / .xls) accepted<br/>
+                        • "Student Name" must match the enrolled student's name (case-insensitive)<br/>
+                        • "Raw Marks" is a number out of <strong>{activePaperRec?.totalMarks || '?'}</strong><br/>
+                        • "Absent" column: write <strong>yes</strong> or <strong>1</strong> to mark absent<br/>
+                        • Percentage and grade are auto-calculated — do not include them<br/>
+                        • PDF import is not supported — save as CSV or Excel
+                      </div>
+                    </div>
+
+                    {/* File upload */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 700, color: '#374151',
+                        display: 'block', marginBottom: '8px' }}>
+                        Upload File
+                      </label>
+                      <input
+                        type="file"
+                        accept=".csv,.xlsx,.xls"
+                        onChange={e => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          setMarkImportError(''); setMarkImportRows([]);
+                          const ext = file.name.split('.').pop().toLowerCase();
+
+                          if (ext === 'csv') {
+                            const reader = new FileReader();
+                            reader.onload = (ev) => {
+                              try {
+                                const lines = ev.target.result.split('\n').filter(l => l.trim());
+                                if (lines.length < 2) {
+                                  setMarkImportError('File appears empty.'); return; }
+                                const hdrs = lines[0].split(',').map(h =>
+                                  h.trim().toLowerCase().replace(/[^a-z0-9]/g,''));
+                                const nameIdx   = hdrs.findIndex(h =>
+                                  h.includes('name') || h.includes('student'));
+                                const marksIdx  = hdrs.findIndex(h =>
+                                  h.includes('raw') || h.includes('marks') || h.includes('score'));
+                                const absentIdx = hdrs.findIndex(h => h.includes('absent'));
+                                if (nameIdx < 0 || marksIdx < 0) {
+                                  setMarkImportError(
+                                    'Cannot find "Student Name" and "Raw Marks" columns.'); return; }
+                                const parsed = lines.slice(1).map(line => {
+                                  const cols  = line.split(',');
+                                  const name  = (cols[nameIdx] || '').trim();
+                                  const raw   = (cols[marksIdx] || '').trim();
+                                  const absV  = absentIdx >= 0
+                                    ? (cols[absentIdx]||'').trim().toLowerCase() : '';
+                                  const absent = absV==='yes'||absV==='1'||absV==='true'||absV==='absent';
+                                  if (!name) return null;
+                                  return { name, rawMarks: raw==='' ? null : parseFloat(raw), absent };
+                                }).filter(Boolean);
+                                setMarkImportRows(parsed);
+                              } catch { setMarkImportError('Failed to parse CSV.'); }
+                            };
+                            reader.readAsText(file);
+
+                          } else {
+                            // Excel via SheetJS
+                            const script = document.createElement('script');
+                            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+                            script.onload = () => {
+                              const reader = new FileReader();
+                              reader.onload = (ev) => {
+                                try {
+                                  const wb   = window.XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
+                                  const json = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+                                  const parsed = (json || []).map(row => {
+                                    const nameK = Object.keys(row).find(k =>
+                                      k.toLowerCase().includes('name')||k.toLowerCase().includes('student'));
+                                    const markK = Object.keys(row).find(k =>
+                                      k.toLowerCase().includes('raw')||k.toLowerCase().includes('marks'));
+                                    const absnK = Object.keys(row).find(k =>
+                                      k.toLowerCase().includes('absent'));
+                                    const name   = nameK ? String(row[nameK]||'').trim() : '';
+                                    const rawStr = markK ? String(row[markK]||'').trim() : '';
+                                    const absV   = absnK ? String(row[absnK]||'').trim().toLowerCase() : '';
+                                    const absent = absV==='yes'||absV==='1'||absV==='true'||absV==='absent';
+                                    if (!name) return null;
+                                    return { name, rawMarks: rawStr==='' ? null : parseFloat(rawStr), absent };
+                                  }).filter(Boolean);
+                                  setMarkImportRows(parsed);
+                                } catch { setMarkImportError('Failed to parse Excel. Try saving as CSV.'); }
+                              };
+                              reader.readAsArrayBuffer(file);
+                            };
+                            script.onerror = () =>
+                              setMarkImportError('Excel parser failed to load. Please save as .csv and retry.');
+                            document.head.appendChild(script);
+                          }
+                        }}
+                        style={{ display: 'block', width: '100%', padding: '10px',
+                          border: '2px dashed #C7D2FE', borderRadius: '8px',
+                          background: '#F5F7FF', cursor: 'pointer',
+                          fontSize: '13px', color: '#4F46E5' }}
+                      />
+                    </div>
+
+                    {/* Error */}
+                    {markImportError && (
+                      <div style={{ padding: '10px 14px', background: '#FEF2F2',
+                        border: '1px solid #FCA5A5', borderRadius: '8px',
+                        fontSize: '12px', color: '#DC2626', fontWeight: 600,
+                        marginBottom: '12px' }}>
+                        ⚠ {markImportError}
+                      </div>
+                    )}
+
+                    {/* Preview table */}
+                    {(markImportRows || []).length > 0 && (() => {
+                      const totalMks = activePaperRec?.totalMarks || 100;
+                      return (
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: 700,
+                            color: '#374151', marginBottom: '8px' }}>
+                            Preview — {markImportRows.length} rows found
+                          </div>
+                          <div style={{ maxHeight: '220px', overflowY: 'auto',
+                            border: '1px solid #E3E6EA', borderRadius: '8px' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse',
+                              fontSize: '12px' }}>
+                              <thead>
+                                <tr style={{ background: '#F8F9FB',
+                                  borderBottom: '1px solid #E3E6EA' }}>
+                                  {['Student Name',`Raw Marks (/${totalMks})`,
+                                    '%','Grade','Absent'].map(h => (
+                                    <th key={h} style={{ padding: '8px 12px', textAlign: 'left',
+                                      fontWeight: 700, color: '#6B7280', fontSize: '10px',
+                                      textTransform: 'uppercase' }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(markImportRows || []).map((row, i) => {
+                                  const pct = (!row.absent && row.rawMarks !== null)
+                                    ? Math.round((row.rawMarks/totalMks)*1000)/10 : null;
+                                  const grade = row.absent ? 'ABS' : calcGrade(pct);
+                                  return (
+                                    <tr key={i} style={{ borderBottom: '1px solid #F1F5F9',
+                                      background: i%2===0 ? 'white' : '#FAFAFA' }}>
+                                      <td style={{ padding: '7px 12px' }}>{row.name}</td>
+                                      <td style={{ padding: '7px 12px', textAlign: 'center',
+                                        fontWeight: 700 }}>
+                                        {row.absent ? '—' : (row.rawMarks ?? '—')}
+                                      </td>
+                                      <td style={{ padding: '7px 12px', textAlign: 'center',
+                                        fontWeight: 700,
+                                        color: pct!==null?(pct>=40?'#059669':'#DC2626'):'#9CA3AF' }}>
+                                        {row.absent?'ABS':pct!==null?`${pct}%`:'—'}
+                                      </td>
+                                      <td style={{ padding: '7px 12px', textAlign: 'center',
+                                        fontWeight: 800, color: gradeColor(grade) }}>{grade}</td>
+                                      <td style={{ padding: '7px 12px', textAlign: 'center',
+                                        color: row.absent ? '#D97706' : '#D1D5DB' }}>
+                                        {row.absent ? 'Yes' : '—'}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Footer */}
+                  <div style={{ padding: '14px 24px 20px',
+                    display: 'flex', justifyContent: 'flex-end', gap: '10px',
+                    borderTop: '1px solid #F1F5F9' }}>
+                    <button onClick={() => setShowMarkImport(false)}
+                      style={{ padding: '9px 20px', borderRadius: '8px',
+                        border: '1px solid #E3E6EA', background: 'white',
+                        color: '#374151', fontSize: '13px', fontWeight: 600,
+                        cursor: 'pointer' }}>
+                      Cancel
+                    </button>
+                    <button
+                      disabled={(markImportRows || []).length === 0}
+                      onClick={() => {
+                        if ((markImportRows || []).length === 0) return;
+                        const batchId  = activeSessionGroup?.batchId || '';
+                        const students = (safeLS('pba_students', []) || [])
+                          .filter(s => s.batchId === batchId);
+                        const totalMks = activePaperRec?.totalMarks || 100;
+                        const passMks  = activePaperRec?.passMarks  || 40;
+                        const now = new Date().toISOString();
+                        const existing = safeLS('pba_exam_results', []);
+                        let updated = [...(existing || [])];
+                        (markImportRows || []).forEach(row => {
+                          const student = (students || []).find(s =>
+                            (s.name||'').toLowerCase().trim() ===
+                            (row.name||'').toLowerCase().trim()
+                          );
+                          if (!student) return;
+                          const rawNum = row.absent ? null
+                            : row.rawMarks !== null ? parseFloat(row.rawMarks) : null;
+                          const pct = (!row.absent && rawNum !== null)
+                            ? Math.round((rawNum/totalMks)*1000)/10 : null;
+                          const record = {
+                            id: `result_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+                            examSessionId:   markExamSessionId,
+                            examSessionName: activeSessionGroup?.examSessionName || '',
+                            batchId,
+                            batchName:   activeSessionGroup?.batchName || '',
+                            subjectId:   markSubjectId,
+                            subjectCode: activePaperRec?.subjectCode || '',
+                            subjectName: activePaperRec?.subjectName || '',
+                            paperNumber: Number(markPaperNumber),
+                            paperName:   activePaperRec?.paperName || `Paper ${markPaperNumber}`,
+                            totalMarks:  totalMks,
+                            passMarks:   passMks,
+                            studentId:   student.id,
+                            studentName: student.name || row.name,
+                            rawMarks:    rawNum,
+                            percentage:  pct,
+                            grade:       row.absent ? 'ABS' : calcGrade(pct),
+                            isPassed:    !row.absent && rawNum !== null && rawNum >= passMks,
+                            absent:      row.absent || false,
+                            enteredAt:   now, updatedAt: now
+                          };
+                          const idx = updated.findIndex(r =>
+                            r.examSessionId === record.examSessionId &&
+                            r.subjectId === record.subjectId &&
+                            Number(r.paperNumber) === Number(record.paperNumber) &&
+                            r.studentId === record.studentId
+                          );
+                          if (idx >= 0) updated[idx] = record;
+                          else updated.push(record);
+                        });
+                        saveLS('pba_exam_results', updated);
+                        setExamResults(updated);
+                        setShowMarkImport(false);
+                        setMarkImportRows([]);
+                      }}
+                      style={{ padding: '9px 20px', borderRadius: '8px', border: 'none',
+                        background: (markImportRows||[]).length>0 ? '#4F46E5' : '#E5E7EB',
+                        color: (markImportRows||[]).length>0 ? 'white' : '#9CA3AF',
+                        fontSize: '13px', fontWeight: 700,
+                        cursor: (markImportRows||[]).length>0 ? 'pointer' : 'not-allowed' }}>
+                      ✓ Import {(markImportRows || []).length} Students
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* SECTION 4 — RESULTS & RANKINGS TAB */}
       {activeTab === "results" && (() => {
