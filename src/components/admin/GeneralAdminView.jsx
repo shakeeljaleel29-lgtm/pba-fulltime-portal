@@ -322,10 +322,12 @@ export const GeneralAdminView = ({ isMobile }) => {
 
   // Subject Manager State
   const [showSubjectModal, setShowSubjectModal] = useState(false);
-  const [editingSubject, setEditingSubject] = useState(null);
+  const [editSubjectId, setEditSubjectId]       = useState(null); // null = Create
   const [subjectForm, setSubjectForm] = useState({
-    name: '', code: '', description: '', curriculum: 'Cambridge', level: 'A Level'
+    subjectCode: '', subjectName: '', description: ''
   });
+  const [showDeleteSubject, setShowDeleteSubject] = useState(false);
+  const [deleteSubjectTarget, setDeleteSubjectTarget] = useState(null);
   const [assigningSubjectId, setAssigningSubjectId] = useState(null);
 
   // Sync state to LS
@@ -457,16 +459,32 @@ export const GeneralAdminView = ({ isMobile }) => {
   const [clsStatusFilter, setClsStatusFilter] = useState("All");
   const [clsSearch, setClsSearch] = useState("");
 
+  // ── Classroom Manager state ──
   const [showClassroomModal, setShowClassroomModal] = useState(false);
-  const [editingClassroom, setEditingClassroom] = useState(null);
+  const [editClassroomId, setEditClassroomId]       = useState(null);
   const [classroomForm, setClassroomForm] = useState({
-    name: "",
-    type: getClassroomTypes()[0]?.id || "Hall",
-    capacity: 40,
-    branch: getBranches()[0] || "Kohuwala",
-    facilities: ["Projector", "AC", "Whiteboard"],
-    isActive: true
+    name: '', branch: '', capacity: 30,
+    type: 'Classroom', amenities: [], status: 'Active'
   });
+  const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
+  const [deactivateTarget, setDeactivateTarget]           = useState(null);
+
+
+
+  useEffect(() => {
+    setSubjects(safeLS('pba_subjects', []));
+    setClassrooms(safeLS('pba_classrooms', []));
+    const t1 = safeLS("pba_timetable", []);
+    const t2 = safeLS("pba_timetable_sessions", []);
+    setTimetable((Array.isArray(t1) && t1.length > 0) ? t1 : (Array.isArray(t2) ? t2 : []));
+  }, [activeTab]);
+
+  const getSubjectBatchCount = (subjectId) => {
+    const batchList = safeLS('pba_batches', []);
+    return (batchList || []).filter(b =>
+      (b.subjects || b.batchSubjects || []).some(bs => bs.subjectId === subjectId)
+    ).length;
+  };
 
   // Daily Allocations Sheet State
   const [allocationDate, setAllocationDate] = useState(() => new Date().toISOString().split("T")[0]);
@@ -991,30 +1009,30 @@ export const GeneralAdminView = ({ isMobile }) => {
             </div>
             <button
               onClick={() => {
-                setEditingSubject(null);
-                setSubjectForm({ name: '', code: '', description: '', curriculum: 'Cambridge', level: 'A Level' });
+                setEditSubjectId(null);
+                setSubjectForm({ subjectCode: '', subjectName: '', description: '' });
                 setShowSubjectModal(true);
               }}
               style={{
-                padding: '8px 16px', borderRadius: '8px',
-                background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
-                color: 'white', border: 'none',
-                fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+                padding: '10px 20px', borderRadius: '10px', border: 'none',
+                background: '#4F46E5', color: 'white', fontSize: '14px',
+                fontWeight: 700, cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: '6px'
               }}>
-              <Plus size={15} /> Create Subject
+              <Plus size={15} /> + Create Subject
             </button>
           </div>
 
           {/* Subject cards grid */}
           {(subjects || []).length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9CA3AF', background: '#FFFFFF', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>📚</div>
-              <div style={{ fontSize: '16px', fontWeight: 700, marginBottom: '6px' }}>
+            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '60px 20px', color: '#9CA3AF', background: '#FFFFFF', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
+              <div style={{ fontSize: '40px', marginBottom: '12px' }}>📚</div>
+              <div style={{ fontWeight: 700, fontSize: '15px', color: '#374151', marginBottom: '6px' }}>
                 No subjects yet
               </div>
               <div style={{ fontSize: '13px' }}>
-                Create subjects here, then assign them to batches.
+                Click "+ Create Subject" to add your first subject.
+                Then assign subjects to batches in Batch Manager → Edit Batch → Assign Subjects.
               </div>
             </div>
           ) : (
@@ -1023,100 +1041,71 @@ export const GeneralAdminView = ({ isMobile }) => {
               gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
               gap: '16px'
             }}>
-              {(subjects || []).map(sub => (
-                <div key={sub.id} style={{
+              {(subjects || []).map(subject => (
+                <div key={subject.id} style={{
                   background: 'white', borderRadius: '12px',
-                  border: '1px solid #E2E8F0', padding: '16px',
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.05)'
+                  border: '1px solid #E3E6EA', padding: '18px 20px',
+                  position: 'relative'
                 }}>
-                  {/* Code badge + name */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                    <div>
-                      {sub.code && (
-                        <span style={{
-                          display: 'inline-block', padding: '2px 8px', borderRadius: '6px',
-                          background: '#EEF2FF', color: '#4F46E5',
-                          fontSize: '11px', fontWeight: 800,
-                          letterSpacing: '0.05em', marginBottom: '6px'
-                        }}>
-                          {sub.code}
-                        </span>
-                      )}
-                      <div style={{ fontSize: '16px', fontWeight: 800, color: '#1A202C' }}>
-                        {sub.name}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button
-                        onClick={() => {
-                          setEditingSubject(sub);
-                          setSubjectForm({
-                            name: sub.name || '', code: sub.code || '',
-                            description: sub.description || '',
-                            curriculum: sub.curriculum || 'Cambridge',
-                            level: sub.level || 'A Level'
-                          });
-                          setShowSubjectModal(true);
-                        }}
-                        style={{ background: '#F1F5F9', border: 'none', borderRadius: '6px',
-                          width: '28px', height: '28px', cursor: 'pointer', fontSize: '13px',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        title="Edit Subject">
-                        ✏️
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (!window.confirm(`Delete subject "${sub.name}"?`)) return;
-                          const updated = (subjects || []).filter(s => s.id !== sub.id);
-                          saveLS('pba_subjects', updated);
-                          setSubjects(updated);
-                        }}
-                        style={{ background: '#FEF2F2', border: 'none', borderRadius: '6px',
-                          width: '28px', height: '28px', cursor: 'pointer', fontSize: '13px',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        title="Delete Subject">
-                        🗑
-                      </button>
-                    </div>
+                  {/* Code badge */}
+                  {(subject.subjectCode || subject.code) && (
+                    <span style={{ display: 'inline-block', padding: '2px 10px',
+                      borderRadius: '6px', background: '#EEF2FF',
+                      color: '#4F46E5', fontSize: '11px', fontWeight: 800,
+                      letterSpacing: '0.07em', marginBottom: '8px' }}>
+                      {subject.subjectCode || subject.code}
+                    </span>
+                  )}
+
+                  {/* Edit + Delete buttons — top right */}
+                  <div style={{ position: 'absolute', top: '14px', right: '14px',
+                    display: 'flex', gap: '6px' }}>
+                    <button
+                      onClick={() => {
+                        setEditSubjectId(subject.id);
+                        setSubjectForm({
+                          subjectCode:  subject.subjectCode  || subject.code || '',
+                          subjectName:  subject.subjectName  || subject.name || '',
+                          description:  subject.description  || ''
+                        });
+                        setShowSubjectModal(true);
+                      }}
+                      title="Edit subject"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: '16px', padding: '2px 4px' }}>✏️</button>
+                    <button
+                      onClick={() => {
+                        setDeleteSubjectTarget(subject);
+                        setShowDeleteSubject(true);
+                      }}
+                      title="Delete subject"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: '16px', padding: '2px 4px' }}>🗑️</button>
                   </div>
 
-                  {/* Curriculum + level chips */}
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
-                    {sub.curriculum && (
-                      <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '11px',
-                        fontWeight: 600, background: '#F0F9FF', color: '#0369A1' }}>
-                        {sub.curriculum}
-                      </span>
-                    )}
-                    {sub.level && (
-                      <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '11px',
-                        fontWeight: 600, background: '#F5F3FF', color: '#6D28D9' }}>
-                        {sub.level}
-                      </span>
-                    )}
+                  {/* Subject name */}
+                  <div style={{ fontWeight: 800, fontSize: '16px', color: '#1A202C',
+                    marginBottom: '6px' }}>
+                    {subject.subjectName || subject.name}
                   </div>
 
                   {/* Description */}
-                  {sub.description && (
-                    <p style={{ fontSize: '12px', color: '#6B7280', margin: 0 }}>
-                      {sub.description}
+                  {subject.description && (
+                    <p style={{ fontSize: '12px', color: '#6B7280', margin: '0 0 8px 0' }}>
+                      {subject.description}
                     </p>
                   )}
 
-                  {/* How many batches use this subject */}
+                  {/* Batch assignment count */}
                   {(() => {
-                    const batchList = safeLS('pba_batches', []);
-                    const count = (batchList || []).filter(b =>
-                      (b.subjects || b.batchSubjects || []).some(bs => bs.subjectId === sub.id)
-                    ).length;
-                    return count > 0 ? (
-                      <p style={{ fontSize: '11px', color: '#059669', marginTop: '8px', fontWeight: 600 }}>
-                        ✓ Assigned to {count} batch{count !== 1 ? 'es' : ''}
-                      </p>
-                    ) : (
-                      <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '8px' }}>
-                        Not assigned to any batch yet
-                      </p>
+                    const count = getSubjectBatchCount(subject.id);
+                    return (
+                      <div style={{ fontSize: '12px',
+                        color: count > 0 ? '#059669' : '#9CA3AF', fontWeight: 600 }}>
+                        {count > 0
+                          ? `✓ Assigned to ${count} batch${count !== 1 ? 'es' : ''}`
+                          : '— Not assigned to any batch'}
+                      </div>
                     );
                   })()}
                 </div>
@@ -1874,126 +1863,7 @@ export const GeneralAdminView = ({ isMobile }) => {
             </div>
           )}
 
-          {/* CREATE / EDIT SUBJECT MODAL */}
-          {showSubjectModal && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
-              <div style={{ background: 'white', borderRadius: '16px', width: '100%', maxWidth: '480px', padding: '28px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
-                <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#1A202C', margin: '0 0 20px' }}>
-                  {editingSubject ? 'Edit Subject' : 'Create New Subject'}
-                </h2>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                  {/* Name — full width */}
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>Subject Name *</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Biology, Mathematics, Physics"
-                      value={subjectForm.name}
-                      onChange={e => setSubjectForm(p => ({ ...p, name: e.target.value }))}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', boxSizing: 'border-box' }}
-                    />
-                  </div>
-
-                  {/* Code */}
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>Subject Code</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. BIO, MATH"
-                      value={subjectForm.code}
-                      onChange={e => setSubjectForm(p => ({
-                        ...p, code: e.target.value.toUpperCase()
-                      }))}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', boxSizing: 'border-box' }}
-                    />
-                  </div>
-
-                  {/* Level */}
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>Level</label>
-                    <select
-                      value={subjectForm.level}
-                      onChange={e => setSubjectForm(p => ({ ...p, level: e.target.value }))}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', background: 'white' }}>
-                      <option value="A Level">A Level</option>
-                      <option value="AS Level">AS Level</option>
-                      <option value="O Level">O Level</option>
-                      <option value="Foundation">Foundation</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-
-                  {/* Curriculum */}
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>Curriculum</label>
-                    <select
-                      value={subjectForm.curriculum}
-                      onChange={e => setSubjectForm(p => ({ ...p, curriculum: e.target.value }))}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', background: 'white' }}>
-                      <option value="Cambridge">Cambridge</option>
-                      <option value="Edexcel">Edexcel</option>
-                      <option value="National">National</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-
-                  {/* Description */}
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '5px' }}>Description (optional)</label>
-                    <input
-                      type="text"
-                      placeholder="Short description"
-                      value={subjectForm.description}
-                      onChange={e => setSubjectForm(p => ({ ...p, description: e.target.value }))}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E3E6EA', fontSize: '14px', boxSizing: 'border-box' }}
-                    />
-                  </div>
-                </div>
-
-                {/* Buttons */}
-                <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowSubjectModal(false)}
-                    style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: 'white', color: '#374151', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}>
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!subjectForm.name.trim()) {
-                        alert('Subject name is required.'); return;
-                      }
-                      if (editingSubject) {
-                        const updated = (subjects || []).map(s =>
-                          s.id === editingSubject.id
-                            ? { ...s, ...subjectForm, name: subjectForm.name.trim(), code: subjectForm.code.trim() }
-                            : s
-                        );
-                        saveLS('pba_subjects', updated);
-                        setSubjects(updated);
-                      } else {
-                        const newSub = {
-                          id: `sub_${Date.now()}`,
-                          ...subjectForm,
-                          name: subjectForm.name.trim(),
-                          code: subjectForm.code.trim(),
-                          createdAt: new Date().toISOString()
-                        };
-                        const updated = [...(subjects || []), newSub];
-                        saveLS('pba_subjects', updated);
-                        setSubjects(updated);
-                      }
-                      setShowSubjectModal(false);
-                    }}
-                    style={{ flex: 2, padding: '10px', borderRadius: '8px', border: 'none', background: '#4F46E5', color: 'white', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>
-                    {editingSubject ? 'Save Changes' : 'Create Subject'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -2015,24 +1885,20 @@ export const GeneralAdminView = ({ isMobile }) => {
             {role === "Admin" && (
               <button
                 onClick={() => {
-                  setEditingClassroom(null);
+                  setEditClassroomId(null);
                   setClassroomForm({
-                    name: "",
-                    type: "Lecture Hall",
-                    capacity: 40,
-                    branch: getBranches()[0] || "Kohuwala",
-                    facilities: ["Projector", "AC", "Whiteboard"],
-                    isActive: true
+                    name: '', branch: '', capacity: 30,
+                    type: 'Classroom', amenities: [], status: 'Active'
                   });
                   setShowClassroomModal(true);
                 }}
                 style={{
-                  background: "linear-gradient(135deg, #2B6CB0, #1A4A8A)",
+                  background: "#1D4ED8",
                   color: "#FFFFFF",
                   border: "none",
-                  borderRadius: "8px",
-                  padding: "8px 16px",
-                  fontSize: "13px",
+                  borderRadius: "10px",
+                  padding: "10px 20px",
+                  fontSize: "14px",
                   fontWeight: 700,
                   cursor: "pointer",
                   display: "flex",
@@ -2040,7 +1906,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                   gap: "6px"
                 }}
               >
-                <Plus size={15} /> Add Classroom
+                <Plus size={15} /> + Add Classroom
               </button>
             )}
           </div>
@@ -2100,12 +1966,12 @@ export const GeneralAdminView = ({ isMobile }) => {
 
           {/* CLASSROOM CARDS GRID */}
           <div style={{ display: "grid", gridTemplateColumns: isMobileState ? "1fr" : "repeat(3, 1fr)", gap: "16px", marginBottom: "24px" }}>
-            {(filteredClassrooms || []).map((cls) => {
-              const isActive = cls.isActive !== false;
-              const facilitiesList = cls.facilities || [];
+            {(filteredClassrooms || []).map((room) => {
+              const isActive = room.status ? room.status === 'Active' : room.isActive !== false;
+              const facilitiesList = room.amenities || room.facilities || [];
               return (
                 <div
-                  key={cls.id}
+                  key={room.id}
                   style={{
                     background: "#FFFFFF",
                     border: "1px solid #E3E6EA",
@@ -2122,7 +1988,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                     {/* Top row */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
                       <h4 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>
-                        {cls.name ?? "—"}
+                        {room.name ?? "—"}
                       </h4>
                       <span
                         style={{
@@ -2150,10 +2016,10 @@ export const GeneralAdminView = ({ isMobile }) => {
                           fontWeight: 600
                         }}
                       >
-                        {cls.branch ?? "—"}
+                        {room.branch ?? "—"}
                       </span>
                       <span style={{ fontSize: "12px", color: "#718096" }}>
-                        👤 {cls.capacity ?? 0} seats
+                        👤 {room.capacity ?? 0} seats
                       </span>
                     </div>
 
@@ -2168,7 +2034,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                           fontSize: "11px"
                         }}
                       >
-                        {cls.type ?? "—"}
+                        {room.type ?? "—"}
                       </span>
                     </div>
 
@@ -2199,7 +2065,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                     <div
                       style={{
                         display: "flex",
-                        justify: "space-between",
+                        justifyContent: "space-between",
                         alignItems: "center",
                         borderTop: "1px solid #F0F2F5",
                         paddingTop: "10px",
@@ -2208,14 +2074,14 @@ export const GeneralAdminView = ({ isMobile }) => {
                     >
                       <button
                         onClick={() => {
-                          setEditingClassroom(cls);
+                          setEditClassroomId(room.id);
                           setClassroomForm({
-                            name: cls.name ?? "",
-                            type: cls.type ?? "Lecture Hall",
-                            capacity: cls.capacity ?? 30,
-                            branch: cls.branch ?? (getBranches()[0] || "Kohuwala"),
-                            facilities: cls.facilities ?? [],
-                            isActive: cls.isActive !== false
+                            name:      room.name      || '',
+                            branch:    room.branch    || '',
+                            capacity:  room.capacity  || 30,
+                            type:      room.type      || 'Classroom',
+                            amenities: room.amenities || room.facilities || [],
+                            status:    room.status    || (room.isActive !== false ? 'Active' : 'Inactive')
                           });
                           setShowClassroomModal(true);
                         }}
@@ -2233,18 +2099,21 @@ export const GeneralAdminView = ({ isMobile }) => {
                       </button>
 
                       <button
-                        onClick={() => handleToggleClassroomStatus(cls)}
+                        onClick={() => {
+                          setDeactivateTarget(room);
+                          setShowDeactivateConfirm(true);
+                        }}
                         style={{
                           background: "none",
                           border: "none",
-                          color: "#718096",
+                          color: isActive ? "#D97706" : "#059669",
                           fontSize: "12px",
                           fontWeight: 600,
                           cursor: "pointer",
                           padding: 0
                         }}
                       >
-                        {isActive ? "Deactivate" : "Activate"}
+                        {isActive ? "Deactivate" : "Reactivate"}
                       </button>
                     </div>
                   )}
@@ -2254,209 +2123,119 @@ export const GeneralAdminView = ({ isMobile }) => {
           </div>
 
           {/* Daily Allocation Sheet */}
-          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: "12px", padding: "18px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <h4 style={{ margin: 0, fontSize: "15px", fontWeight: 700, color: "#1A202C" }}>
-                Daily Allocation Sheet ({selectedDayName})
-              </h4>
-              <button
-                onClick={handleShareAllocationSheetWhatsApp}
-                style={{
-                  background: "#25D366",
-                  color: "#FFF",
-                  border: "none",
-                  borderRadius: "6px",
-                  padding: "6px 12px",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  cursor: "pointer"
-                }}
-              >
-                Share via WhatsApp
-              </button>
-            </div>
-            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
-              <table style={{ minWidth: "600px", width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: "#F8FAFC", borderBottom: "2px solid #E3E6EA" }}>
-                  <th style={{ padding: "8px", textAlign: "left" }}>TIME</th>
-                  <th style={{ padding: "8px", textAlign: "left" }}>CLASSROOM</th>
-                  <th style={{ padding: "8px", textAlign: "left" }}>BATCH</th>
-                  <th style={{ padding: "8px", textAlign: "left" }}>SUBJECT</th>
-                  <th style={{ padding: "8px", textAlign: "left" }}>LECTURER</th>
-                  <th style={{ padding: "8px", textAlign: "left" }}>ASSISTANT</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(processedTodaySessions || []).map((s) => {
-                  const asst = s.assistantId ? (allLecturers || []).find((u) => u.id === s.assistantId) : null;
-                  return (
-                    <tr key={s.id || Math.random()} style={{ borderBottom: "1px solid #F0F2F5" }}>
-                      <td style={{ padding: "8px", fontWeight: 600 }}>{s.startTime}–{s.endTime}</td>
-                      <td style={{ padding: "8px" }}>{s.classroomName || s.classroom || "—"}</td>
-                      <td style={{ padding: "8px" }}>{s.batchName || s.batch || "—"}</td>
-                      <td style={{ padding: "8px" }}>{s.subjectName || s.subject || "—"}</td>
-                      <td style={{ padding: "8px" }}>{s.lecturerName || s.lecturer || "—"}</td>
-                      <td style={{ padding: "8px", color: asst ? "#B7860A" : "#A0AEC0", fontWeight: asst ? 600 : 400 }}>{asst ? asst.name : "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          </div>
+          {(() => {
+            const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+            const todayAllocations = (timetable || [])
+              .filter(s => s.day === todayDayName)
+              .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
 
-          {/* ADD / EDIT CLASSROOM MODAL */}
-          {showClassroomModal && (
-            <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
-              <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "520px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
-                <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>
-                  {editingClassroom ? "Edit Classroom" : "Add Classroom"}
-                </h3>
-                <form onSubmit={handleSaveClassroom}>
-                  {/* 1. Classroom Name */}
-                  <div style={{ marginBottom: "14px" }}>
-                    <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>
-                      Classroom Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={classroomForm.name}
-                      onChange={(e) => setClassroomForm({ ...classroomForm, name: e.target.value })}
-                      style={{ width: "100%", padding: "8px 12px", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
-                    />
+            return (
+              <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: "12px", padding: "18px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                  <div style={{ fontWeight: 700, fontSize: '15px', color: '#1A202C' }}>
+                    Daily Allocation Sheet ({todayDayName})
                   </div>
-
-                  {/* 2. Branch & 3. Capacity */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>
-                        Branch
-                      </label>
-                      <select
-                        value={classroomForm.branch}
-                        onChange={(e) => setClassroomForm({ ...classroomForm, branch: e.target.value })}
-                        style={{ width: "100%", padding: "8px 12px", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", background: "#FFF", boxSizing: "border-box" }}
-                      >
-                        {getBranches().map((b) => (
-                          <option key={b} value={b}>{b}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>
-                        Capacity
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="500"
-                        value={classroomForm.capacity}
-                        onChange={(e) => setClassroomForm({ ...classroomForm, capacity: parseInt(e.target.value) || 1 })}
-                        style={{ width: "100%", padding: "8px 12px", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* 4. Type */}
-                  <div style={{ marginBottom: "14px" }}>
-                    <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>
-                      Classroom Type
-                    </label>
-                    <select
-                      value={classroomForm.type}
-                      onChange={(e) => setClassroomForm({ ...classroomForm, type: e.target.value })}
-                      style={{ width: "100%", padding: "8px 12px", border: "1.5px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", background: "#FFF", boxSizing: "border-box" }}
-                    >
-                      <option value="Lecture Hall">Lecture Hall</option>
-                      <option value="Classroom">Classroom</option>
-                      <option value="Science Lab">Science Lab</option>
-                      <option value="Computer Lab">Computer Lab</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-
-                  {/* 5. Facilities multi-checkbox */}
-                  <div style={{ marginBottom: "14px" }}>
-                    <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
-                      Facilities
-                    </label>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                      {[
-                        "Projector",
-                        "Whiteboard",
-                        "AC",
-                        "Lab Equipment",
-                        "Computer",
-                        "Smart Board",
-                        "CCTV"
-                      ].map((fac) => {
-                        const isChecked = (classroomForm.facilities || []).includes(fac);
-                        return (
-                          <label key={fac} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#2D3748", cursor: "pointer" }}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {
-                                const current = classroomForm.facilities || [];
-                                const updated = isChecked
-                                  ? current.filter((f) => f !== fac)
-                                  : [...current, fac];
-                                setClassroomForm({ ...classroomForm, facilities: updated });
-                              }}
-                            />
-                            {fac}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* 6. Status toggle */}
-                  <div style={{ marginBottom: "20px" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 600, color: "#2D3748", cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        checked={classroomForm.isActive !== false}
-                        onChange={(e) => setClassroomForm({ ...classroomForm, isActive: e.target.checked })}
-                      />
-                      Active Classroom
-                    </label>
-                  </div>
-
-                  {/* Footer */}
-                  <div style={{ display: "flex", justifyContent: editingClassroom ? "space-between" : "flex-end", alignItems: "center", borderTop: "1px solid #E3E6EA", paddingTop: "14px" }}>
-                    {editingClassroom && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteClassroom(editingClassroom.id)}
-                        style={{ background: "none", border: "none", color: "#C53030", fontSize: "13px", fontWeight: 600, cursor: "pointer", padding: 0 }}
-                      >
-                        Delete Classroom
-                      </button>
-                    )}
-                    <div style={{ display: "flex", gap: "10px" }}>
-                      <button
-                        type="button"
-                        onClick={() => setShowClassroomModal(false)}
-                        style={{ background: "#FFF", border: "1px solid #E3E6EA", padding: "8px 16px", borderRadius: "8px", fontSize: "13px", color: "#4A5568", fontWeight: 600, cursor: "pointer" }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        style={{ background: "#2B6CB0", color: "#FFF", border: "none", padding: "8px 20px", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}
-                      >
-                        Save Classroom
-                      </button>
-                    </div>
-                  </div>
-                </form>
+                  <button
+                    onClick={() => {
+                      if ((todayAllocations || []).length === 0) {
+                        alert('No sessions scheduled for today to share.');
+                        return;
+                      }
+                      const lines = [
+                        `*📋 Daily Allocation Sheet — ${todayDayName}*`,
+                        `_PBA Full-Time Portal_`,
+                        '',
+                        ...(todayAllocations || []).map(s =>
+                          `🕐 *${s.startTime || '—'}${s.endTime ? '–'+s.endTime : ''}*` +
+                          `\n📍 ${s.classroomName || 'No room'}` +
+                          `\n📚 ${s.subjectName || '—'} (${s.batchName || '—'})` +
+                          `\n👤 ${s.lecturerName || '—'}` +
+                          (s.assistantName || (s.assistants && s.assistants.length > 0)
+                            ? `\n🤝 ${(s.assistants||[]).map(a=>a.lecturerName).filter(Boolean).join(', ') || s.assistantName}`
+                            : '')
+                        )
+                      ];
+                      const text = lines.join('\n');
+                      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                    }}
+                    style={{
+                      background: "#25D366",
+                      color: "#FFF",
+                      border: "none",
+                      borderRadius: "6px",
+                      padding: "6px 12px",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      cursor: "pointer"
+                    }}
+                  >
+                    Share via WhatsApp
+                  </button>
+                </div>
+                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
+                  <table style={{ minWidth: "600px", width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#F8FAFC", borderBottom: "2px solid #E3E6EA" }}>
+                        <th style={{ padding: "10px 16px", textAlign: "left" }}>TIME</th>
+                        <th style={{ padding: "10px 16px", textAlign: "left" }}>CLASSROOM</th>
+                        <th style={{ padding: "10px 16px", textAlign: "left" }}>BATCH</th>
+                        <th style={{ padding: "10px 16px", textAlign: "left" }}>SUBJECT</th>
+                        <th style={{ padding: "10px 16px", textAlign: "left" }}>LECTURER</th>
+                        <th style={{ padding: "10px 16px", textAlign: "left" }}>ASSISTANT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(todayAllocations || []).length === 0 ? (
+                        <tr>
+                          <td colSpan={6} style={{ padding: '32px', textAlign: 'center', color: '#9CA3AF', fontSize: '13px' }}>
+                            No sessions scheduled for {todayDayName}.
+                            Sessions appear here once scheduled in the Visual Timetable Builder.
+                          </td>
+                        </tr>
+                      ) : (
+                        (todayAllocations || []).map((session, idx) => (
+                          <tr key={session.id || idx}
+                            style={{ borderBottom: '1px solid #F1F5F9', background: idx % 2 === 0 ? 'white' : '#FAFAFA' }}>
+                            <td style={{ padding: '10px 16px', fontSize: '13px', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
+                              {session.startTime || '—'}
+                              {session.endTime ? `–${session.endTime}` : ''}
+                            </td>
+                            <td style={{ padding: '10px 16px', fontSize: '13px', color: '#1A202C' }}>
+                              {session.classroomName
+                                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4F46E5', flexShrink: 0 }} />
+                                    {session.classroomName}
+                                  </span>
+                                : <span style={{ color: '#D1D5DB' }}>— Not set —</span>}
+                            </td>
+                            <td style={{ padding: '10px 16px', fontSize: '13px', color: '#374151' }}>
+                              {session.batchName || '—'}
+                            </td>
+                            <td style={{ padding: '10px 16px', fontSize: '13px', color: '#374151' }}>
+                              {session.subjectCode
+                                ? <span>
+                                    <span style={{ fontWeight: 700, color: '#4F46E5', marginRight: '6px' }}>{session.subjectCode}</span>
+                                    {session.subjectName || ''}
+                                  </span>
+                                : (session.subjectName || '—')}
+                            </td>
+                            <td style={{ padding: '10px 16px', fontSize: '13px', color: '#374151' }}>
+                              {session.lecturerName || '—'}
+                            </td>
+                            <td style={{ padding: '10px 16px', fontSize: '13px', color: '#6B7280' }}>
+                              {(session.assistants && (session.assistants || []).length > 0)
+                                ? (session.assistants || []).map(a => a.lecturerName).filter(Boolean).join(', ')
+                                : (session.assistantName || '—')}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       )}
 
@@ -4503,6 +4282,461 @@ export const GeneralAdminView = ({ isMobile }) => {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── SUBJECT MANAGER MODAL (Fix 1B) ── */}
+      {showSubjectModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          zIndex: 2000, display: 'flex', alignItems: 'center',
+          justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '14px', width: '460px',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.25)', overflow: 'hidden' }}>
+
+            {/* Header */}
+            <div style={{ background: 'linear-gradient(135deg,#1E1B4B,#4F46E5)',
+              padding: '18px 24px', display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 800, fontSize: '16px', color: 'white' }}>
+                {editSubjectId ? '✏️ Edit Subject' : '+ Create Subject'}
+              </div>
+              <button onClick={() => setShowSubjectModal(false)}
+                style={{ background: 'rgba(255,255,255,0.15)', border: 'none',
+                  color: 'white', borderRadius: '6px', padding: '4px 12px',
+                  cursor: 'pointer', fontSize: '16px' }}>×</button>
+            </div>
+
+            <div style={{ padding: '24px' }}>
+
+              {/* Subject Code */}
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '6px' }}>
+                  Subject Code *
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={subjectForm.subjectCode}
+                  onChange={e => setSubjectForm(prev => ({
+                    ...prev, subjectCode: e.target.value.toUpperCase()
+                  }))}
+                  placeholder="e.g. BIO, CHEM, MATH"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '14px', fontWeight: 700,
+                    color: '#4F46E5', boxSizing: 'border-box', letterSpacing: '0.05em' }}
+                />
+              </div>
+
+              {/* Subject Name */}
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '6px' }}>
+                  Subject Name *
+                </label>
+                <input
+                  type="text"
+                  value={subjectForm.subjectName}
+                  onChange={e => setSubjectForm(prev => ({
+                    ...prev, subjectName: e.target.value
+                  }))}
+                  placeholder="e.g. Biology, Chemistry, Mathematics"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '14px',
+                    boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Description */}
+              <div style={{ marginBottom: '24px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '6px' }}>
+                  Description (optional)
+                </label>
+                <textarea
+                  value={subjectForm.description}
+                  onChange={e => setSubjectForm(prev => ({
+                    ...prev, description: e.target.value
+                  }))}
+                  placeholder="Brief description of this subject..."
+                  rows={3}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '13px',
+                    resize: 'vertical', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Buttons */}
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button onClick={() => setShowSubjectModal(false)}
+                  style={{ padding: '10px 20px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', background: 'white',
+                    color: '#374151', fontSize: '13px', fontWeight: 600,
+                    cursor: 'pointer' }}>
+                  Cancel
+                </button>
+                <button
+                  disabled={!subjectForm.subjectCode.trim() || !subjectForm.subjectName.trim()}
+                  onClick={() => {
+                    const code = subjectForm.subjectCode.trim();
+                    const name = subjectForm.subjectName.trim();
+                    if (!code || !name) return;
+                    const existing = safeLS('pba_subjects', []);
+                    let updated;
+                    if (editSubjectId) {
+                      updated = (existing || []).map(s =>
+                        s.id === editSubjectId
+                          ? { ...s, subjectCode: code, code: code, subjectName: name, name: name,
+                              description: subjectForm.description.trim() }
+                          : s
+                      );
+                    } else {
+                      const newSub = {
+                        id: `sub_${Date.now()}`,
+                        subjectCode: code,
+                        code: code,
+                        subjectName: name,
+                        name: name,
+                        description: subjectForm.description.trim(),
+                        createdAt: new Date().toISOString()
+                      };
+                      updated = [...(existing || []), newSub];
+                    }
+                    saveLS('pba_subjects', updated);
+                    setSubjects(updated);
+                    setShowSubjectModal(false);
+                  }}
+                  style={{
+                    padding: '10px 24px', borderRadius: '8px', border: 'none',
+                    background: (subjectForm.subjectCode.trim() && subjectForm.subjectName.trim())
+                      ? '#4F46E5' : '#E5E7EB',
+                    color: (subjectForm.subjectCode.trim() && subjectForm.subjectName.trim())
+                      ? 'white' : '#9CA3AF',
+                    fontSize: '13px', fontWeight: 700,
+                    cursor: (subjectForm.subjectCode.trim() && subjectForm.subjectName.trim())
+                      ? 'pointer' : 'not-allowed'
+                  }}>
+                  {editSubjectId ? 'Save Changes' : 'Create Subject'}
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SUBJECT DELETE CONFIRMATION MODAL (Fix 1C) ── */}
+      {showDeleteSubject && deleteSubjectTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          zIndex: 2100, display: 'flex', alignItems: 'center',
+          justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '14px', width: '400px',
+            padding: '28px 24px', boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            textAlign: 'center' }}>
+            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🗑️</div>
+            <div style={{ fontWeight: 800, fontSize: '17px', color: '#1A202C',
+              marginBottom: '8px' }}>
+              Delete {deleteSubjectTarget.subjectName || deleteSubjectTarget.name}?
+            </div>
+            {(() => {
+              const count = getSubjectBatchCount(deleteSubjectTarget.id);
+              return count > 0 ? (
+                <div style={{ padding: '10px 14px', background: '#FEF3C7',
+                  border: '1px solid #F59E0B', borderRadius: '8px',
+                  fontSize: '12px', color: '#92400E', fontWeight: 600,
+                  marginBottom: '16px' }}>
+                  ⚠ This subject is assigned to {count} batch{count > 1 ? 'es' : ''}.
+                  Deleting it will not remove batch assignments automatically.
+                  Remove it from batches first in Batch Manager → Edit Batch → Assign Subjects.
+                </div>
+              ) : (
+                <div style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px' }}>
+                  This cannot be undone. The subject will be removed from the subject list.
+                </div>
+              );
+            })()}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button onClick={() => { setShowDeleteSubject(false); setDeleteSubjectTarget(null); }}
+                style={{ padding: '10px 24px', borderRadius: '8px',
+                  border: '1px solid #E3E6EA', background: 'white',
+                  color: '#374151', fontSize: '13px', fontWeight: 600,
+                  cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const existing = safeLS('pba_subjects', []);
+                  const updated = (existing || []).filter(
+                    s => s.id !== deleteSubjectTarget.id
+                  );
+                  saveLS('pba_subjects', updated);
+                  setSubjects(updated);
+                  setShowDeleteSubject(false);
+                  setDeleteSubjectTarget(null);
+                }}
+                style={{ padding: '10px 24px', borderRadius: '8px', border: 'none',
+                  background: '#DC2626', color: 'white',
+                  fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CLASSROOM MANAGER MODAL (Fix 2) ── */}
+      {showClassroomModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          zIndex: 2000, display: 'flex', alignItems: 'center',
+          justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '14px', width: '500px',
+            maxHeight: '90vh', overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.25)', overflow: 'hidden' }}>
+
+            {/* Header */}
+            <div style={{ background: 'linear-gradient(135deg,#0F172A,#1D4ED8)',
+              padding: '18px 24px', display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 800, fontSize: '16px', color: 'white' }}>
+                {editClassroomId ? '✏️ Edit Classroom' : '+ Add Classroom'}
+              </div>
+              <button onClick={() => setShowClassroomModal(false)}
+                style={{ background: 'rgba(255,255,255,0.15)', border: 'none',
+                  color: 'white', borderRadius: '6px', padding: '4px 12px',
+                  cursor: 'pointer', fontSize: '16px' }}>×</button>
+            </div>
+
+            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column',
+              gap: '16px' }}>
+
+              {/* Room Name */}
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '6px' }}>Room / Hall Name *</label>
+                <input type="text"
+                  value={classroomForm.name}
+                  onChange={e => setClassroomForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Hall A, Lab 01, Room 3B"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '14px',
+                    boxSizing: 'border-box' }} />
+              </div>
+
+              {/* Branch */}
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '6px' }}>Branch / Location *</label>
+                <input type="text"
+                  value={classroomForm.branch}
+                  onChange={e => setClassroomForm(p => ({ ...p, branch: e.target.value }))}
+                  placeholder="e.g. Kohuwala, Wattala, Panadura"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '14px',
+                    boxSizing: 'border-box' }} />
+              </div>
+
+              {/* Capacity + Type row */}
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                    display: 'block', marginBottom: '6px' }}>Seating Capacity</label>
+                  <input type="number" min={1} max={500}
+                    value={classroomForm.capacity}
+                    onChange={e => setClassroomForm(p => ({
+                      ...p, capacity: Number(e.target.value) || 1
+                    }))}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '14px',
+                      boxSizing: 'border-box' }} />
+                </div>
+                <div style={{ flex: 2 }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                    display: 'block', marginBottom: '6px' }}>Room Type</label>
+                  <select
+                    value={classroomForm.type}
+                    onChange={e => setClassroomForm(p => ({ ...p, type: e.target.value }))}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '14px',
+                      background: 'white', boxSizing: 'border-box' }}>
+                    {['Classroom','Lecture Hall','Science Lab','Computer Lab','Other'].map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Amenities */}
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '8px' }}>Amenities</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {['Projector','Whiteboard','AC','Lab Equipment',
+                    'Smart Board','CCTV','WiFi'].map(amenity => {
+                    const checked = (classroomForm.amenities || []).includes(amenity);
+                    return (
+                      <label key={amenity}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px',
+                          padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
+                          border: `1px solid ${checked ? '#4F46E5' : '#E3E6EA'}`,
+                          background: checked ? '#EEF2FF' : 'white',
+                          color: checked ? '#4F46E5' : '#374151',
+                          fontSize: '12px', fontWeight: 600,
+                          userSelect: 'none' }}>
+                        <input type="checkbox" checked={checked}
+                          onChange={() => {
+                            setClassroomForm(p => ({
+                              ...p,
+                              amenities: checked
+                                ? (p.amenities || []).filter(a => a !== amenity)
+                                : [...(p.amenities || []), amenity]
+                            }));
+                          }}
+                          style={{ display: 'none' }} />
+                        {amenity}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Status (edit only) */}
+              {editClassroomId && (
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                    display: 'block', marginBottom: '6px' }}>Status</label>
+                  <select
+                    value={classroomForm.status}
+                    onChange={e => setClassroomForm(p => ({ ...p, status: e.target.value }))}
+                    style={{ padding: '10px 12px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '14px',
+                      background: 'white' }}>
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Buttons */}
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end',
+                paddingTop: '8px' }}>
+                <button onClick={() => setShowClassroomModal(false)}
+                  style={{ padding: '10px 20px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', background: 'white',
+                    color: '#374151', fontSize: '13px', fontWeight: 600,
+                    cursor: 'pointer' }}>
+                  Cancel
+                </button>
+                <button
+                  disabled={!classroomForm.name.trim() || !classroomForm.branch.trim()}
+                  onClick={() => {
+                    if (!classroomForm.name.trim() || !classroomForm.branch.trim()) return;
+                    const existing = safeLS('pba_classrooms', []);
+                    let updated;
+                    if (editClassroomId) {
+                      updated = (existing || []).map(r =>
+                        r.id === editClassroomId
+                          ? { ...r, ...classroomForm, name: classroomForm.name.trim(),
+                              branch: classroomForm.branch.trim(),
+                              facilities: classroomForm.amenities,
+                              isActive: classroomForm.status === 'Active' }
+                          : r
+                      );
+                    } else {
+                      const newRoom = {
+                        id: `room_${Date.now()}`,
+                        ...classroomForm,
+                        name:   classroomForm.name.trim(),
+                        branch: classroomForm.branch.trim(),
+                        facilities: classroomForm.amenities,
+                        isActive: classroomForm.status === 'Active',
+                        createdAt: new Date().toISOString()
+                      };
+                      updated = [...(existing || []), newRoom];
+                    }
+                    saveLS('pba_classrooms', updated);
+                    setClassrooms(updated);
+                    setShowClassroomModal(false);
+                  }}
+                  style={{
+                    padding: '10px 24px', borderRadius: '8px', border: 'none',
+                    background: (classroomForm.name.trim() && classroomForm.branch.trim())
+                      ? '#1D4ED8' : '#E5E7EB',
+                    color: (classroomForm.name.trim() && classroomForm.branch.trim())
+                      ? 'white' : '#9CA3AF',
+                    fontSize: '13px', fontWeight: 700,
+                    cursor: (classroomForm.name.trim() && classroomForm.branch.trim())
+                      ? 'pointer' : 'not-allowed'
+                  }}>
+                  {editClassroomId ? 'Save Changes' : 'Add Classroom'}
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── DEACTIVATE CONFIRMATION MODAL (Fix 2) ── */}
+      {showDeactivateConfirm && deactivateTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          zIndex: 2100, display: 'flex', alignItems: 'center',
+          justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '14px', width: '380px',
+            padding: '28px 24px', boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            textAlign: 'center' }}>
+            <div style={{ fontSize: '36px', marginBottom: '10px' }}>⚠️</div>
+            <div style={{ fontWeight: 800, fontSize: '16px', color: '#1A202C',
+              marginBottom: '8px' }}>
+              {(deactivateTarget.status ? deactivateTarget.status === 'Active' : deactivateTarget.isActive !== false)
+                ? `Deactivate ${deactivateTarget.name}?`
+                : `Reactivate ${deactivateTarget.name}?`}
+            </div>
+            <div style={{ fontSize: '13px', color: '#6B7280', marginBottom: '20px' }}>
+              {(deactivateTarget.status ? deactivateTarget.status === 'Active' : deactivateTarget.isActive !== false)
+                ? 'This classroom will be hidden from session scheduling until reactivated.'
+                : 'This classroom will become available for session scheduling again.'}
+            </div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button onClick={() => {
+                setShowDeactivateConfirm(false); setDeactivateTarget(null);
+              }}
+                style={{ padding: '10px 20px', borderRadius: '8px',
+                  border: '1px solid #E3E6EA', background: 'white',
+                  color: '#374151', fontSize: '13px', fontWeight: 600,
+                  cursor: 'pointer' }}>Cancel</button>
+              <button
+                onClick={() => {
+                  const existing = safeLS('pba_classrooms', []);
+                  const updated = (existing || []).map(r => {
+                    if (r.id === deactivateTarget.id) {
+                      const currentIsActive = r.status ? r.status === 'Active' : r.isActive !== false;
+                      const newStatus = currentIsActive ? 'Inactive' : 'Active';
+                      return { ...r, status: newStatus, isActive: newStatus === 'Active' };
+                    }
+                    return r;
+                  });
+                  saveLS('pba_classrooms', updated);
+                  setClassrooms(updated);
+                  setShowDeactivateConfirm(false);
+                  setDeactivateTarget(null);
+                }}
+                style={{ padding: '10px 20px', borderRadius: '8px', border: 'none',
+                  background: (deactivateTarget.status ? deactivateTarget.status === 'Active' : deactivateTarget.isActive !== false) ? '#D97706' : '#059669',
+                  color: 'white', fontSize: '13px', fontWeight: 700,
+                  cursor: 'pointer' }}>
+                {(deactivateTarget.status ? deactivateTarget.status === 'Active' : deactivateTarget.isActive !== false) ? 'Deactivate' : 'Reactivate'}
+              </button>
+            </div>
           </div>
         </div>
       )}
