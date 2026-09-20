@@ -69,6 +69,29 @@ export const ExamManagementView = ({ isMobile }) => {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [editingExam, setEditingExam] = useState(null);
 
+  // Edit Session — reuses the existing new-exam modal in edit mode
+  const [editExamSessionId, setEditExamSessionId] = useState(null);
+  // null = Create mode, 'examSession_xxx' = Edit mode
+
+  // Delete Session confirmation
+  const [showDeleteSession, setShowDeleteSession]   = useState(false);
+  const [deleteSessionTarget, setDeleteSessionTarget] = useState(null);
+  // { examSessionId, examSessionName }
+
+  // Edit Paper modal (single paper)
+  const [showEditPaper, setShowEditPaper]   = useState(false);
+  const [editPaperRecord, setEditPaperRecord] = useState(null);
+  // The full pba_exam_schedule record for this paper
+  const [editPaperForm, setEditPaperForm] = useState({
+    date: '', startTime: '', endTime: '',
+    totalMarks: 100, passMarks: 40, venue: '', paperName: ''
+  });
+
+  // Delete single paper confirmation
+  const [showDeletePaper, setShowDeletePaper]   = useState(false);
+  const [deletePaperTarget, setDeletePaperTarget] = useState(null);
+  // The full pba_exam_schedule record
+
   // Import Modal & Preview
   const [showImportModal, setShowImportModal] = useState(false);
   const [importRows, setImportRows] = useState([]);
@@ -296,6 +319,7 @@ export const ExamManagementView = ({ isMobile }) => {
       subjectRows: []
     });
     setSelectedSubjectIds([]);
+    setEditExamSessionId(null);
     setShowScheduleModal(true);
   };
 
@@ -385,7 +409,7 @@ export const ExamManagementView = ({ isMobile }) => {
     setMarkEntryState(initial);
   }, [selectedExamId, allMarks, combinedExams, students, batches]);
 
-  // Save new exam session
+  // Save new or edit exam session
   const handleSaveExamSession = () => {
     if (!scheduleForm.examSessionName.trim()) {
       alert('Please enter an exam session name.'); return;
@@ -400,7 +424,9 @@ export const ExamManagementView = ({ isMobile }) => {
       alert('Please select at least one subject.'); return;
     }
 
-    const examSessionId = `examSession_${Date.now()}`;
+    const sessionId = editExamSessionId
+      ? editExamSessionId
+      : `examSession_${Date.now()}`;
     const now = new Date().toISOString();
     const newRecords = [];
 
@@ -408,19 +434,21 @@ export const ExamManagementView = ({ isMobile }) => {
       (row.papers || []).forEach((paper, pIdx) => {
         if (!paper.date || !paper.startTime || !paper.endTime) return;
         newRecords.push({
-          id: `examrec_${Date.now()}_${newRecords.length}`,
-          examSessionId,
+          id: `examrec_${Date.now()}_${newRecords.length}_${Math.random().toString(36).slice(2, 6)}`,
+          examSessionId: sessionId,
           examSessionName: scheduleForm.examSessionName.trim(),
           examType: scheduleForm.examType || 'Internal',
           batchId: scheduleForm.batchId,
           batchName: scheduleForm.batchName || '',
           sessionStartDate: scheduleForm.sessionStartDate,
           sessionEndDate: scheduleForm.sessionEndDate,
+          periodStart: scheduleForm.sessionStartDate,
+          periodEnd: scheduleForm.sessionEndDate,
           subjectId: row.subjectId,
           subjectCode: row.subjectCode || '',
           subjectName: row.subjectName || '',
-          paperNumber: pIdx + 1,
-          paperName: paper.paperName.trim() || `Paper ${pIdx + 1}`,
+          paperNumber: paper.paperNumber || (pIdx + 1),
+          paperName: (paper.paperName || '').trim() || `Paper ${paper.paperNumber || (pIdx + 1)}`,
           date: paper.date,
           startTime: paper.startTime,
           endTime: paper.endTime,
@@ -428,7 +456,7 @@ export const ExamManagementView = ({ isMobile }) => {
           passMarks: Number(paper.passMarks) || 40,
           venue: paper.venue || '',
           notes: paper.notes || '',
-          status: 'Scheduled',
+          status: 'Pending',
           createdAt: now
         });
       });
@@ -439,8 +467,22 @@ export const ExamManagementView = ({ isMobile }) => {
     }
 
     const existing = safeLS('pba_exam_schedule', []);
-    saveLS('pba_exam_schedule', [...(existing || []), ...newRecords]);
-    setExamSchedule(safeLS('pba_exam_schedule', []));
+    let updated;
+    if (editExamSessionId) {
+      // EDIT MODE: remove old records for this session, add new ones
+      const withoutOld = (existing || []).filter(
+        r => r.examSessionId !== editExamSessionId
+      );
+      updated = [...withoutOld, ...newRecords];
+    } else {
+      // CREATE MODE: just append
+      updated = [...(existing || []), ...newRecords];
+    }
+
+    saveLS('pba_exam_schedule', updated);
+    setExamSchedule(updated);
+
+    setEditExamSessionId(null);
     setShowScheduleModal(false);
   };
 
@@ -1072,11 +1114,94 @@ export const ExamManagementView = ({ isMobile }) => {
                       {group.sessionStartDate ? ` · ${group.sessionStartDate} → ${group.sessionEndDate}` : ''}
                     </div>
                   </div>
-                  <div style={{
-                    background: 'rgba(255,255,255,0.2)', borderRadius: '20px',
-                    padding: '4px 12px', fontSize: '11px', color: 'white', fontWeight: 700
-                  }}>
-                    {donePapers}/{totalPapers} papers done
+                  {/* Edit + Delete buttons — top-right of session header */}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+
+                    {/* Papers done badge — keep existing */}
+                    <span style={{
+                      background: 'rgba(255,255,255,0.2)', borderRadius: '20px',
+                      padding: '4px 12px', fontSize: '11px', color: 'white', fontWeight: 700
+                    }}>
+                      {donePapers}/{totalPapers} papers done
+                    </span>
+
+                    {/* Edit Session button */}
+                    <button
+                      onClick={() => {
+                        // Load this session's records into the new-exam modal form
+                        const sessionRecs = (examSchedule || []).filter(
+                          r => r.examSessionId === group.examSessionId
+                        );
+                        if (sessionRecs.length === 0) return;
+                        const first = sessionRecs[0];
+
+                        // Rebuild the subjectRows structure the modal uses
+                        const subjectMap = {};
+                        (sessionRecs || []).forEach(r => {
+                          if (!subjectMap[r.subjectId]) {
+                            subjectMap[r.subjectId] = {
+                              subjectId:   r.subjectId,
+                              subjectCode: r.subjectCode || '',
+                              subjectName: r.subjectName || '',
+                              papers: []
+                            };
+                          }
+                          subjectMap[r.subjectId].papers.push({
+                            paperNumber: r.paperNumber,
+                            paperName:   r.paperName   || '',
+                            date:        r.date        || '',
+                            startTime:   r.startTime   || '',
+                            endTime:     r.endTime     || '',
+                            totalMarks:  r.totalMarks  || 100,
+                            passMarks:   r.passMarks   || 40,
+                            venue:       r.venue       || ''
+                          });
+                        });
+                        const loadedSubjectRows = Object.values(subjectMap).map(sub => ({
+                          ...sub,
+                          papers: (sub.papers || []).sort((a,b) =>
+                            (a.paperNumber||0) - (b.paperNumber||0))
+                        }));
+
+                        setBatches(safeLS('pba_batches', []));
+                        setScheduleForm({
+                          examSessionName:  first.examSessionName || '',
+                          batchId:          first.batchId         || '',
+                          batchName:        first.batchName       || '',
+                          examType:         first.examType        || 'Internal',
+                          sessionStartDate: first.sessionStartDate || first.periodStart || '',
+                          sessionEndDate:   first.sessionEndDate   || first.periodEnd   || '',
+                          subjectRows:      loadedSubjectRows
+                        });
+                        setSelectedSubjectIds(Object.keys(subjectMap));
+                        setEditExamSessionId(group.examSessionId);
+                        setShowScheduleModal(true);
+                      }}
+                      style={{ padding: '5px 12px', borderRadius: '7px',
+                        border: '1px solid rgba(255,255,255,0.4)',
+                        background: 'rgba(255,255,255,0.15)',
+                        color: 'white', fontSize: '12px', fontWeight: 700,
+                        cursor: 'pointer' }}>
+                      ✏️ Edit
+                    </button>
+
+                    {/* Delete Session button */}
+                    <button
+                      onClick={() => {
+                        setDeleteSessionTarget({
+                          examSessionId:   group.examSessionId,
+                          examSessionName: group.examSessionName
+                        });
+                        setShowDeleteSession(true);
+                      }}
+                      style={{ padding: '5px 12px', borderRadius: '7px',
+                        border: '1px solid rgba(255,100,100,0.5)',
+                        background: 'rgba(220,38,38,0.2)',
+                        color: '#FCA5A5', fontSize: '12px', fontWeight: 700,
+                        cursor: 'pointer' }}>
+                      🗑️ Delete
+                    </button>
+
                   </div>
                 </div>
 
@@ -1100,10 +1225,11 @@ export const ExamManagementView = ({ isMobile }) => {
                             border: paper.status === 'Completed'
                               ? '1px solid #A7F3D0' : '1px solid #E3E6EA',
                             background: paper.status === 'Completed' ? '#F0FDF4' : '#FAFAFA',
-                            borderRadius: '10px', padding: '10px 14px', minWidth: '185px'
+                            borderRadius: '10px', padding: '10px 14px', minWidth: '185px',
+                            position: 'relative'
                           }}>
                             <div style={{ display: 'flex', alignItems: 'center',
-                              justifyContent: 'space-between', marginBottom: '4px' }}>
+                              justifyContent: 'space-between', marginBottom: '4px', paddingRight: '55px' }}>
                               <span style={{ fontSize: '12px', fontWeight: 700, color: '#1A202C' }}>
                                 {paper.paperName || `Paper ${paper.paperNumber || 1}`}
                               </span>
@@ -1112,6 +1238,51 @@ export const ExamManagementView = ({ isMobile }) => {
                                 : <span style={{ fontSize: '10px', color: '#D97706', fontWeight: 700 }}>⏳ Pending</span>
                               }
                             </div>
+
+                            {/* Edit + Delete icons — top-right corner of paper card */}
+                            <div style={{ position: 'absolute', top: '8px', right: '8px',
+                              display: 'flex', gap: '4px' }}>
+
+                              {/* Edit paper */}
+                              <button
+                                onClick={() => {
+                                  setEditPaperRecord(paper); // the full schedule record
+                                  setEditPaperForm({
+                                    paperName:  paper.paperName  || '',
+                                    date:       paper.date       || '',
+                                    startTime:  paper.startTime  || '',
+                                    endTime:    paper.endTime    || '',
+                                    totalMarks: paper.totalMarks || 100,
+                                    passMarks:  paper.passMarks  || 40,
+                                    venue:      paper.venue      || ''
+                                  });
+                                  setShowEditPaper(true);
+                                }}
+                                title="Edit paper"
+                                style={{ width: '24px', height: '24px', borderRadius: '5px',
+                                  border: '1px solid #E3E6EA', background: 'white',
+                                  cursor: 'pointer', fontSize: '12px', display: 'flex',
+                                  alignItems: 'center', justifyContent: 'center' }}>
+                                ✏️
+                              </button>
+
+                              {/* Delete paper */}
+                              <button
+                                onClick={() => {
+                                  setDeletePaperTarget(paper);
+                                  setShowDeletePaper(true);
+                                }}
+                                title="Delete paper"
+                                style={{ width: '24px', height: '24px', borderRadius: '5px',
+                                  border: '1px solid #FCA5A5', background: '#FEF2F2',
+                                  cursor: 'pointer', fontSize: '12px', display: 'flex',
+                                  alignItems: 'center', justifyContent: 'center',
+                                  color: '#DC2626' }}>
+                                ×
+                              </button>
+
+                            </div>
+
                             <div style={{ fontSize: '11px', color: '#6B7280' }}>📅 {paper.date}</div>
                             <div style={{ fontSize: '11px', color: '#6B7280' }}>
                               🕐 {paper.startTime}–{paper.endTime}
@@ -2633,13 +2804,13 @@ export const ExamManagementView = ({ isMobile }) => {
             }}>
               <div>
                 <div style={{ fontSize: '18px', fontWeight: 800, color: 'white' }}>
-                  📋 Schedule New Examination
+                  {editExamSessionId ? '✏️ Edit Exam Session' : '+ Schedule New Exam'}
                 </div>
                 <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.75)', marginTop: '2px' }}>
                   Name session → select batch → set period → pick subjects → schedule papers
                 </div>
               </div>
-              <button onClick={() => setShowScheduleModal(false)}
+              <button onClick={() => { setShowScheduleModal(false); setEditExamSessionId(null); }}
                 style={{ background: 'rgba(255,255,255,0.15)', border: 'none',
                   color: 'white', borderRadius: '8px', padding: '6px 14px',
                   cursor: 'pointer', fontSize: '18px', fontWeight: 700 }}>×</button>
@@ -3035,7 +3206,7 @@ export const ExamManagementView = ({ isMobile }) => {
               display: 'flex', justifyContent: 'flex-end', gap: '10px',
               borderTop: '1px solid #F1F5F9', marginTop: '20px',
               background: '#FAFBFF', position: 'sticky', bottom: 0 }}>
-              <button onClick={() => setShowScheduleModal(false)}
+              <button onClick={() => { setShowScheduleModal(false); setEditExamSessionId(null); }}
                 style={{ padding: '10px 20px', borderRadius: '8px',
                   border: '1px solid #E3E6EA', background: 'white',
                   color: '#374151', fontSize: '14px', fontWeight: 600,
@@ -3047,7 +3218,7 @@ export const ExamManagementView = ({ isMobile }) => {
                   background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
                   color: 'white', fontSize: '14px', fontWeight: 700,
                   cursor: 'pointer', boxShadow: '0 2px 8px rgba(79,70,229,0.35)' }}>
-                📋 Save Exam Session
+                {editExamSessionId ? 'Save Changes' : 'Schedule Exam Session'}
               </button>
             </div>
           </div>
@@ -3143,6 +3314,299 @@ export const ExamManagementView = ({ isMobile }) => {
                 style={{ background: 'linear-gradient(135deg, #2B6CB0, #1A4A8A)', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(43,108,176,0.30)' }}
               >
                 Confirm Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE SESSION CONFIRMATION MODAL */}
+      {showDeleteSession && deleteSessionTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          zIndex: 3000, display: 'flex', alignItems: 'center',
+          justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '14px', width: '420px',
+            padding: '28px 24px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            textAlign: 'center' }}>
+            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🗑️</div>
+            <div style={{ fontWeight: 800, fontSize: '17px', color: '#1A202C',
+              marginBottom: '8px' }}>
+              Delete "{deleteSessionTarget.examSessionName}"?
+            </div>
+            <div style={{ padding: '12px 14px', background: '#FEF2F2',
+              border: '1px solid #FCA5A5', borderRadius: '8px',
+              fontSize: '12px', color: '#DC2626', fontWeight: 600,
+              marginBottom: '20px', textAlign: 'left' }}>
+              ⚠ This will permanently delete:<br/>
+              • All paper schedules for this exam session<br/>
+              • All mark entries (results) for this exam session<br/>
+              This cannot be undone.
+            </div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                onClick={() => {
+                  setShowDeleteSession(false);
+                  setDeleteSessionTarget(null);
+                }}
+                style={{ padding: '10px 24px', borderRadius: '8px',
+                  border: '1px solid #E3E6EA', background: 'white',
+                  color: '#374151', fontSize: '13px', fontWeight: 600,
+                  cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const id = deleteSessionTarget.examSessionId;
+                  // Delete schedule records
+                  const schedExisting = safeLS('pba_exam_schedule', []);
+                  saveLS('pba_exam_schedule',
+                    (schedExisting || []).filter(r => r.examSessionId !== id));
+                  // Delete results records
+                  const resExisting = safeLS('pba_exam_results', []);
+                  saveLS('pba_exam_results',
+                    (resExisting || []).filter(r => r.examSessionId !== id));
+                  // Refresh state
+                  setExamSchedule(safeLS('pba_exam_schedule', []));
+                  setExamResults(safeLS('pba_exam_results', []));
+                  setShowDeleteSession(false);
+                  setDeleteSessionTarget(null);
+                }}
+                style={{ padding: '10px 24px', borderRadius: '8px', border: 'none',
+                  background: '#DC2626', color: 'white',
+                  fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+                Delete Session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT PAPER MODAL */}
+      {showEditPaper && editPaperRecord && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          zIndex: 3000, display: 'flex', alignItems: 'center',
+          justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '14px', width: '460px',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.25)', overflow: 'hidden' }}>
+
+            {/* Header */}
+            <div style={{ background: 'linear-gradient(135deg,#1E1B4B,#4F46E5)',
+              padding: '16px 22px', display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '15px', color: 'white' }}>
+                  ✏️ Edit Paper
+                </div>
+                <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)',
+                  marginTop: '2px' }}>
+                  {editPaperRecord.subjectName} —{' '}
+                  {editPaperRecord.paperName || `Paper ${editPaperRecord.paperNumber}`}
+                  &nbsp;·&nbsp;{editPaperRecord.examSessionName}
+                </div>
+              </div>
+              <button onClick={() => { setShowEditPaper(false); setEditPaperRecord(null); }}
+                style={{ background: 'rgba(255,255,255,0.15)', border: 'none',
+                  color: 'white', borderRadius: '6px', padding: '4px 12px',
+                  cursor: 'pointer', fontSize: '16px' }}>×</button>
+            </div>
+
+            <div style={{ padding: '22px', display: 'flex', flexDirection: 'column',
+              gap: '14px' }}>
+
+              {/* Paper Name */}
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '5px' }}>Paper Name / Label</label>
+                <input type="text"
+                  value={editPaperForm.paperName}
+                  onChange={e => setEditPaperForm(p => ({ ...p, paperName: e.target.value }))}
+                  placeholder="e.g. Paper 1 (MCQ), Unit 2, Paper 4"
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '13px',
+                    boxSizing: 'border-box' }} />
+              </div>
+
+              {/* Date */}
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '5px' }}>Exam Date</label>
+                <input type="date"
+                  value={editPaperForm.date}
+                  onChange={e => setEditPaperForm(p => ({ ...p, date: e.target.value }))}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '13px',
+                    boxSizing: 'border-box' }} />
+              </div>
+
+              {/* Time row */}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                    display: 'block', marginBottom: '5px' }}>Start Time</label>
+                  <input type="time"
+                    value={editPaperForm.startTime}
+                    onChange={e => setEditPaperForm(p => ({ ...p, startTime: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '13px',
+                      boxSizing: 'border-box' }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                    display: 'block', marginBottom: '5px' }}>End Time</label>
+                  <input type="time"
+                    value={editPaperForm.endTime}
+                    onChange={e => setEditPaperForm(p => ({ ...p, endTime: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '13px',
+                      boxSizing: 'border-box' }} />
+                </div>
+              </div>
+
+              {/* Marks row */}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                    display: 'block', marginBottom: '5px' }}>Total Marks</label>
+                  <input type="number" min={1}
+                    value={editPaperForm.totalMarks}
+                    onChange={e => setEditPaperForm(p => ({
+                      ...p, totalMarks: Number(e.target.value) || 1
+                    }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '13px',
+                      boxSizing: 'border-box' }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                    display: 'block', marginBottom: '5px' }}>Pass Mark</label>
+                  <input type="number" min={0}
+                    value={editPaperForm.passMarks}
+                    onChange={e => setEditPaperForm(p => ({
+                      ...p, passMarks: Number(e.target.value) || 0
+                    }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                      border: '1px solid #E3E6EA', fontSize: '13px',
+                      boxSizing: 'border-box' }} />
+                </div>
+              </div>
+
+              {/* Venue */}
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '5px' }}>Venue (optional)</label>
+                <input type="text"
+                  value={editPaperForm.venue}
+                  onChange={e => setEditPaperForm(p => ({ ...p, venue: e.target.value }))}
+                  placeholder="e.g. Hall A, Room 3B"
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '13px',
+                    boxSizing: 'border-box' }} />
+              </div>
+
+              {/* Buttons */}
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end',
+                paddingTop: '6px' }}>
+                <button onClick={() => { setShowEditPaper(false); setEditPaperRecord(null); }}
+                  style={{ padding: '9px 20px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', background: 'white',
+                    color: '#374151', fontSize: '13px', fontWeight: 600,
+                    cursor: 'pointer' }}>Cancel</button>
+                <button
+                  onClick={() => {
+                    const existing = safeLS('pba_exam_schedule', []);
+                    const updated = (existing || []).map(r => {
+                      if (r.id !== editPaperRecord.id) return r;
+                      return {
+                        ...r,
+                        paperName:  editPaperForm.paperName.trim() || r.paperName,
+                        date:       editPaperForm.date,
+                        startTime:  editPaperForm.startTime,
+                        endTime:    editPaperForm.endTime,
+                        totalMarks: Number(editPaperForm.totalMarks) || r.totalMarks,
+                        passMarks:  Number(editPaperForm.passMarks)  || r.passMarks,
+                        venue:      editPaperForm.venue.trim()
+                      };
+                    });
+                    saveLS('pba_exam_schedule', updated);
+                    setExamSchedule(updated);
+                    setShowEditPaper(false);
+                    setEditPaperRecord(null);
+                  }}
+                  style={{ padding: '9px 24px', borderRadius: '8px', border: 'none',
+                    background: '#4F46E5', color: 'white',
+                    fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+                  Save Changes
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE SINGLE PAPER CONFIRMATION MODAL */}
+      {showDeletePaper && deletePaperTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          zIndex: 3000, display: 'flex', alignItems: 'center',
+          justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '14px', width: '380px',
+            padding: '28px 24px', boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            textAlign: 'center' }}>
+            <div style={{ fontSize: '36px', marginBottom: '10px' }}>🗑️</div>
+            <div style={{ fontWeight: 800, fontSize: '16px', color: '#1A202C',
+              marginBottom: '6px' }}>
+              Delete{' '}
+              {deletePaperTarget.paperName || `Paper ${deletePaperTarget.paperNumber}`}?
+            </div>
+            <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '14px' }}>
+              {deletePaperTarget.subjectName} · {deletePaperTarget.examSessionName}
+            </div>
+            <div style={{ padding: '10px 12px', background: '#FEF3C7',
+              border: '1px solid #F59E0B', borderRadius: '8px',
+              fontSize: '12px', color: '#92400E', fontWeight: 600,
+              marginBottom: '18px' }}>
+              ⚠ Any mark entries for this paper will also be deleted.
+            </div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                onClick={() => {
+                  setShowDeletePaper(false); setDeletePaperTarget(null);
+                }}
+                style={{ padding: '9px 20px', borderRadius: '8px',
+                  border: '1px solid #E3E6EA', background: 'white',
+                  color: '#374151', fontSize: '13px', fontWeight: 600,
+                  cursor: 'pointer' }}>Cancel</button>
+              <button
+                onClick={() => {
+                  // Delete the paper schedule record
+                  const schedExisting = safeLS('pba_exam_schedule', []);
+                  saveLS('pba_exam_schedule',
+                    (schedExisting || []).filter(r => r.id !== deletePaperTarget.id));
+                  // Delete matching result records
+                  const resExisting = safeLS('pba_exam_results', []);
+                  saveLS('pba_exam_results',
+                    (resExisting || []).filter(r =>
+                      !(r.examSessionId === deletePaperTarget.examSessionId &&
+                        r.subjectId     === deletePaperTarget.subjectId &&
+                        Number(r.paperNumber) === Number(deletePaperTarget.paperNumber))
+                    )
+                  );
+                  setExamSchedule(safeLS('pba_exam_schedule', []));
+                  setExamResults(safeLS('pba_exam_results', []));
+                  setShowDeletePaper(false);
+                  setDeletePaperTarget(null);
+                }}
+                style={{ padding: '9px 20px', borderRadius: '8px', border: 'none',
+                  background: '#DC2626', color: 'white',
+                  fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+                Delete Paper
               </button>
             </div>
           </div>
