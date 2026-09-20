@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+* {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --page-bg:      #F0F4FF;
+  --card-bg:      #FFFFFF;
+  --accent:       #4F46E5;
+  --gold:         #F59E0B;
+  --gold-light:   #FEF3C7;
+  --sidebar-bg:   linear-gradient(180deg, #0F172A 0%, #1A2744 100%);
+  --text-primary: #0F172A;
+  --text-muted:   #94A3B8;
+  --radius:       16px;
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md:    0 2px 16px rgba(0,0,0,0.06);
+  --shadow-lg:    0 8px 32px rgba(79,70,229,0.1);
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13px;
+  background: #F0F4FF;
+  color: #0F172A;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeSlideIn 0.22s ease both; }
+
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: #F0F4FF;
+}
+
+.page-enter {
+  animation: fadeSlideIn 0.2s ease forwards;
+}
+
+tr.hoverable:hover td, tr:hover td {
+  background: #F8FAFF;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: #6366F1 !important;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
+}
+
+/* Responsive sidebar */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed !important;
+    left: -260px !important;
+    transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    z-index: 1000 !important;
+  }
+  .sidebar.open {
+    left: 0 !important;
+  }
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15,23,42,0.5);
+    backdrop-filter: blur(4px);
+    z-index: 999;
+  }
+  .sidebar-overlay.visible {
+    display: block;
+  }
+}
