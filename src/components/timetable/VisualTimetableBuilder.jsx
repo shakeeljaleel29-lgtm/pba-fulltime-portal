@@ -663,6 +663,49 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
     ? modalAvailableLecturers
     : (allLecturers || []);
 
+  const getLecturerLabel = (lecturer, selectedDay) => {
+    if (!lecturer) return "";
+    const avail = (lecturer.availability || []).filter(a => a && a.isAvailable !== false);
+
+    // If a day is already selected in the form, show availability for that day
+    if (selectedDay) {
+      const dayAvail = avail.filter(a => a.day === selectedDay || a.dayOfWeek === selectedDay);
+      if (dayAvail.length > 0) {
+        const windows = dayAvail.map(a => {
+          const start = a.startTime || a.from || "";
+          const end = a.endTime || a.to || "";
+          return start && end ? `${start}–${end}` : (typeof a === "string" ? a : "Available");
+        }).join(", ");
+        return `${lecturer.name} · ${selectedDay.slice(0, 3)} ${windows}`;
+      } else {
+        return `${lecturer.name} · (Not available ${selectedDay})`;
+      }
+    }
+
+    // No day selected yet — show overall availability summary
+    if (avail.length === 0) {
+      return `${lecturer.name} · (No availability set)`;
+    }
+
+    // Compact summary: e.g. "Mon–Fri 08:00–18:00" or "Mon 09:30–14:00"
+    const days = [...new Set(avail.map(a => a.day || a.dayOfWeek).filter(Boolean))];
+    if (days.length === 1) {
+      const d = avail[0];
+      const start = d.startTime || d.from || "";
+      const end = d.endTime || d.to || "";
+      const dayStr = (d.day || d.dayOfWeek || "").slice(0, 3);
+      return `${lecturer.name} · ${dayStr} ${start}–${end}`.trim();
+    }
+    if (days.length >= 5) {
+      const times = avail[0];
+      const start = times.startTime || times.from || "";
+      const end = times.endTime || times.to || "";
+      return `${lecturer.name} · Mon–Fri ${start}–${end}`.trim();
+    }
+    const summary = days.map(day => day.slice(0, 3)).join("/");
+    return `${lecturer.name} · ${summary}`;
+  };
+
   const selectedBatch = (batches || []).find((b) => b.id === activeBatchId);
 
   return (
@@ -1174,8 +1217,14 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                 const lecturer  = allLecturers.find(u => u.id === sess.lecturerId);
                 const classroom = classrooms.find(c => c.id === sess.classroomId);
 
-                const subjectName   = subject?.name   || '(No Subject)';
-                const batchName     = batch?.name     || '(No Batch)';
+                const rawSubName = subject?.name || (sess.subjectName !== "(No Subject)" ? sess.subjectName : null);
+                const hasNoSubject = !rawSubName || rawSubName === "(No Subject)";
+                const batchName = batch?.name || sess.batchName || "(No Batch)";
+                const cardTitle = !hasNoSubject
+                  ? rawSubName
+                  : (sess.subjectCode || subject?.code)
+                    ? `${sess.subjectCode || subject?.code}`
+                    : `[No Subject — ${batchName !== "(No Batch)" ? batchName : "Unknown Batch"}]`;
                 const lecturerName  = lecturer?.name  || '—';
                 const classroomName = classroom?.name || '—';
 
@@ -1249,12 +1298,13 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                       )}
                     </div>
 
-                    {/* Subject name — MUST use resolved name, not literal "Subject" */}
+                    {/* Subject name */}
                     <div style={{
-                      fontSize: '12px', fontWeight: 700, color: '#1A202C',
+                      fontSize: '12px', fontWeight: 700,
+                      color: hasNoSubject ? '#D97706' : '#1A202C',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
                     }}>
-                      {subjectName}
+                      {hasNoSubject && '⚠ '}{cardTitle}
                     </div>
 
                     {/* Batch name */}
@@ -1264,6 +1314,12 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                     }}>
                       {batchName}
                     </div>
+
+                    {hasNoSubject && (
+                      <div style={{ fontSize: '10px', color: '#D97706', fontStyle: 'italic', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        Assign subjects in Batch Manager
+                      </div>
+                    )}
 
                     {/* Time */}
                     <div style={{ fontSize: '10px', color: '#2B6CB0', marginTop: '2px', fontWeight: 600 }}>
@@ -1381,11 +1437,21 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                       );
                     })}
                   </select>
-                  {sessionForm.batchId && modalBatchSubjects.length === 0 && (
-                    <p style={{ fontSize: "11px", color: "#E53E3E", margin: "4px 0 0" }}>
-                      ⚠ No subjects assigned to this batch yet.
-                      Go to Batch Manager → Edit Batch → Assign Subjects first.
-                    </p>
+                  {sessionForm.batchId && (modalBatchSubjects || []).length === 0 && (
+                    <div style={{
+                      marginTop: '6px',
+                      padding: '8px 12px',
+                      background: '#FFF7ED',
+                      border: '1px solid #FED7AA',
+                      borderRadius: '8px',
+                      fontSize: '11px',
+                      color: '#92400E',
+                      fontWeight: 600
+                    }}>
+                      ⚠ This batch has no subjects assigned yet.
+                      Go to <strong>General Admin → Batch Manager → Edit Batch → Assign Subjects</strong>
+                      before scheduling sessions. You cannot select a subject until subjects are assigned.
+                    </div>
                   )}
                 </div>
               </div>
@@ -1399,23 +1465,49 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                     disabled={!sessionForm.subjectId}
                     style={{
                       width: "100%",
-                      padding: "8px 10px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
                       border: "1px solid #E3E6EA",
-                      borderRadius: "7px",
                       fontSize: "13px",
                       opacity: !sessionForm.subjectId ? 0.5 : 1
                     }}
                   >
                     <option value="">— Select Lecturer —</option>
-                    {(modalLecturerOptions || []).map((u) => {
-                      const isAvail = isLecturerAvailable(u.id, sessionForm.day, sessionForm.startTime, sessionForm.endTime, allLecturers);
-                      return (
-                        <option key={u.id} value={u.id}>
-                          {u.name} {u.branch ? `(${u.branch})` : ""} {!isAvail ? "• (Unavailable)" : ""}
-                        </option>
-                      );
-                    })}
+                    {(modalLecturerOptions || []).map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {getLecturerLabel(l, sessionForm.day)}
+                      </option>
+                    ))}
                   </select>
+                  {sessionForm.lecturerId && (() => {
+                    const lect = (allLecturers || []).find((l) => l.id === sessionForm.lecturerId);
+                    if (!lect) return null;
+                    const dayAvail = (lect.availability || []).filter(
+                      (a) => a && (a.day === sessionForm.day || a.dayOfWeek === sessionForm.day) && a.isAvailable !== false
+                    );
+                    if (dayAvail.length > 0) {
+                      const windows = dayAvail
+                        .map((a) => {
+                          const start = a.startTime || a.from || "";
+                          const end = a.endTime || a.to || "";
+                          return start && end ? `${start}–${end}` : (typeof a === "string" ? a : "");
+                        })
+                        .filter(Boolean)
+                        .join(", ");
+                      return (
+                        <p style={{ fontSize: "11px", color: "#059669", marginTop: "4px", fontWeight: 600 }}>
+                          ✓ Available {sessionForm.day}: {windows || "Set"}
+                        </p>
+                      );
+                    } else if (sessionForm.day) {
+                      return (
+                        <p style={{ fontSize: "11px", color: "#D97706", marginTop: "4px", fontWeight: 600 }}>
+                          ⚠ No availability set for {sessionForm.day} — session can still be saved
+                        </p>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
 
                 <div>

@@ -1112,7 +1112,12 @@ const LecturerManagementViewInner = ({ isMobile }) => {
         const getLecturerCellInfo = (lecturer, day) => {
           let avail = [];
           if (Array.isArray(lecturer.availability)) {
-            avail = lecturer.availability.filter(a => a && (a.day === day || a.dayOfWeek === day) && a.isAvailable !== false);
+            avail = lecturer.availability.filter(a => {
+              if (!a) return false;
+              if (typeof a === 'string') return a.toLowerCase().includes(day.toLowerCase());
+              const matchDay = a.day === day || a.dayOfWeek === day;
+              return matchDay && a.isAvailable !== false;
+            });
           } else if (lecturer.availability && typeof lecturer.availability === 'object') {
             const raw = lecturer.availability[day];
             if (Array.isArray(raw)) avail = raw;
@@ -1395,18 +1400,18 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                                   </div>
                                 ))
                               ) : avail.length > 0 ? (
-                                <div style={{ color: '#718096', fontSize: '11px', fontStyle: 'italic', padding: '4px 0' }}>
+                                <div style={{ color: '#9CA3AF', fontSize: '11px', fontStyle: 'italic', padding: '4px 0' }}>
                                   {avail.map((a, idx) => {
-                                    const timeStr = typeof a === 'string'
-                                      ? a
-                                      : (a.startTime && a.endTime ? `${a.startTime}–${a.endTime}` : (a.from && a.to ? `${a.from}–${a.to}` : 'Available'));
+                                    const start = a.startTime || a.from;
+                                    const end = a.endTime || a.to;
+                                    const timeStr = start && end ? `${start}–${end}` : (typeof a === 'string' ? a : '');
                                     return (
-                                      <div key={idx}>Free {timeStr}</div>
+                                      <div key={idx}>{timeStr ? `Free ${timeStr}` : 'Free'}</div>
                                     );
                                   })}
                                 </div>
                               ) : (
-                                <span style={{ color: '#CBD5E0', fontSize: '11px' }}>—</span>
+                                <span style={{ color: '#E2E8F0', fontSize: '13px' }}>—</span>
                               )}
                             </td>
                           );
