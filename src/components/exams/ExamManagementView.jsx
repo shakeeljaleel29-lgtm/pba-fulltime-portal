@@ -1387,10 +1387,11 @@ export const ExamManagementView = ({ isMobile }) => {
                             <div style={{ fontSize: '11px', color: '#6B7280' }}>
                               🕐 {paper.startTime}–{paper.endTime}
                             </div>
-                            <div style={{ fontSize: '11px', color: '#6B7280' }}>
-                              Marks: {paper.passMarks}/{paper.totalMarks}
-                              {paper.venue ? ` · ${paper.venue}` : ''}
-                            </div>
+                            {paper.venue ? (
+                              <div style={{ fontSize: '11px', color: '#6B7280' }}>
+                                📍 {paper.venue}
+                              </div>
+                            ) : null}
 
                             {/* Invigilator row */}
                             <div style={{
