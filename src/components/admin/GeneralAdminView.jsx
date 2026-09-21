@@ -3932,33 +3932,31 @@ export const GeneralAdminView = ({ isMobile }) => {
                   setBatchEnrollments(updated);
                   saveLS("pba_batch_enrollments", updated);
 
-                  // ── Sync enrolled students to pba_students ──
-                  const existingStudentRecords = safeLS('pba_students', []);
-                  const updatedStudentRecords = [...(existingStudentRecords || [])];
+                  // ── Sync student profiles to pba_students (profile only — no batchId) ──
+                  const existingProfiles = safeLS('pba_students', []);
+                  const updatedProfiles = [...(existingProfiles || [])];
                   enrollSelectedStudentIds.forEach(stId => {
                     const st = (data.students || []).find(s => s.id === stId);
                     if (!st) return;
-                    const existingIdx = updatedStudentRecords.findIndex(
+                    const existingIdx = updatedProfiles.findIndex(
                       s => s.id === stId || (st.regNo && s.regNo === st.regNo)
                     );
-                    const studentRecord = {
+                    const profile = {
                       id: stId,
                       regNo: st.regNo || '',
                       name: st.name || '',
-                      batchId: enrolledPanelBatch.id,
-                      batchName: enrolledPanelBatch.name,
                       mobilePhone: st.phone || st.mobilePhone || '',
                       parentPhone: st.parentPhone || '',
-                      status: 'Active',
-                      enrolledAt: nowIso.slice(0, 10)
+                      status: st.status || 'active'
+                      // NOTE: no batchId — student can be in multiple batches
                     };
                     if (existingIdx >= 0) {
-                      updatedStudentRecords[existingIdx] = { ...updatedStudentRecords[existingIdx], ...studentRecord };
+                      updatedProfiles[existingIdx] = { ...updatedProfiles[existingIdx], ...profile };
                     } else {
-                      updatedStudentRecords.push(studentRecord);
+                      updatedProfiles.push(profile);
                     }
                   });
-                  saveLS('pba_students', updatedStudentRecords);
+                  saveLS('pba_students', updatedProfiles);
                   // ── End sync ──
 
                   setShowEnrollModal(false);

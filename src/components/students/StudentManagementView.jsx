@@ -55,73 +55,78 @@ export const StudentManagementView = ({ isMobile }) => {
     setBatches(safeLS('pba_batches', []));
   }, []);
 
-  // Merge students from pba_students AND pba_batches enrollment records
+  // Build merged student list: unique students from pba_students + pba_batches,
+  // each decorated with batches[] and batchIds[] for multi-batch support.
   const getMergedStudents = () => {
-    const directStudents = safeLS('pba_students', []);
+    const profiles = safeLS('pba_students', []);
     const currentBatches = safeLS('pba_batches', []);
-    const contextStudents = data.students || [];
 
-    // Build a unified set starting from context (AppContext) students
-    const merged = [...contextStudents];
-    const mergedIds = new Set((contextStudents).map(s => s.id));
-    const mergedRegs = new Set((contextStudents).map(s => s.regNo).filter(Boolean));
-
-    // Add students from pba_students not already in context
-    (directStudents || []).forEach(s => {
-      if (!mergedIds.has(s.id) && !(s.regNo && mergedRegs.has(s.regNo))) {
-        merged.push(s);
-        mergedIds.add(s.id);
-        if (s.regNo) mergedRegs.add(s.regNo);
-      }
-    });
-
-    // Add students enrolled via batch manager (pba_batches[].students)
+    // Build batchMap: studentId -> [{ id, name }]
+    const batchMap = {};
     (currentBatches || []).forEach(batch => {
       const enrolled = batch.students || batch.enrolledStudents || [];
       (enrolled || []).forEach(s => {
         const sid = s.id || s.studentId;
-        const regNo = s.regNo || '';
-        if (!mergedIds.has(sid) && !(regNo && mergedRegs.has(regNo))) {
-          merged.push({
-            id: sid,
-            regNo: regNo,
-            name: s.name || s.studentName || '',
-            batchId: batch.id,
-            batchName: batch.name,
-            phone: s.mobilePhone || s.phone || '',
-            mobilePhone: s.mobilePhone || s.phone || '',
-            parentPhone: s.parentPhone || '',
-            status: s.status || 'Active',
-            enrolledAt: s.enrolledAt || ''
-          });
-          mergedIds.add(sid);
-          if (regNo) mergedRegs.add(regNo);
+        if (!sid) return;
+        if (!batchMap[sid]) batchMap[sid] = [];
+        if (!batchMap[sid].some(b => b.id === batch.id)) {
+          batchMap[sid].push({ id: batch.id, name: batch.name });
         }
       });
     });
 
-    // Also pull from pba_batch_enrollments (the Batch Manager enrollment table)
-    const batchEnrollments = safeLS('pba_batch_enrollments', []);
-    (batchEnrollments || []).filter(e => e.status === 'active').forEach(enr => {
-      if (!mergedIds.has(enr.studentId)) {
-        // Try to find base student data from context
-        const base = contextStudents.find(s => s.id === enr.studentId);
-        const batchObj = (currentBatches || []).find(b => b.id === enr.batchId);
-        if (base) {
-          // Update existing record with batch info if it was missing
-          const existIdx = merged.findIndex(s => s.id === base.id);
-          if (existIdx >= 0 && !merged[existIdx].batchId) {
-            merged[existIdx] = {
-              ...merged[existIdx],
-              batchId: enr.batchId,
-              batchName: batchObj?.name || enr.batchId
-            };
-          }
-        }
-      }
+    const seen = new Set();
+    const result = [];
+
+    // Start from pba_students profiles
+    (profiles || []).forEach(s => {
+      const sid = s.id;
+      if (!sid || seen.has(sid)) return;
+      seen.add(sid);
+      const batchEntries = batchMap[sid] || [];
+      result.push({
+        ...s,
+        batches: batchEntries.map(b => b.name),
+        batchIds: batchEntries.map(b => b.id)
+      });
     });
 
-    return merged;
+    // Add students found only in pba_batches (not yet in pba_students)
+    (currentBatches || []).forEach(batch => {
+      const enrolled = batch.students || batch.enrolledStudents || [];
+      (enrolled || []).forEach(s => {
+        const sid = s.id || s.studentId;
+        if (!sid || seen.has(sid)) return;
+        seen.add(sid);
+        const batchEntries = batchMap[sid] || [];
+        result.push({
+          id: sid,
+          regNo: s.regNo || '',
+          name: s.name || s.studentName || '',
+          mobilePhone: s.mobilePhone || s.phone || '',
+          parentPhone: s.parentPhone || '',
+          status: s.status || 'active',
+          batches: batchEntries.map(b => b.name),
+          batchIds: batchEntries.map(b => b.id)
+        });
+      });
+    });
+
+    // Also include students from AppContext that aren't in either store yet
+    (data.students || []).forEach(s => {
+      const sid = s.id;
+      if (!sid || seen.has(sid)) return;
+      seen.add(sid);
+      const batchEntries = batchMap[sid] || [];
+      result.push({
+        ...s,
+        mobilePhone: s.phone || s.mobilePhone || '',
+        batches: batchEntries.map(b => b.name),
+        batchIds: batchEntries.map(b => b.id)
+      });
+    });
+
+    return result;
   };
 
   // Filters
@@ -219,14 +224,11 @@ export const StudentManagementView = ({ isMobile }) => {
   const allStudents = getMergedStudents();
 
   const filteredStudents = (allStudents || []).filter((st) => {
-    const stBatchName = resolveBatchName(st);
     const matchesBatch =
       filterBatch === "All" ||
-      st.batch === filterBatch ||
-      st.batchName === filterBatch ||
-      st.batchId === filterBatch ||
-      stBatchName === filterBatch;
-    const matchesStatus = filterStatus === "All" || st.status === filterStatus;
+      (st.batchIds || []).includes(filterBatch) ||
+      (st.batches || []).includes(filterBatch);
+    const matchesStatus = filterStatus === "All" || (st.status || '').toLowerCase() === filterStatus.toLowerCase();
     const matchesQuery =
       (st.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (st.regNo || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -661,7 +663,7 @@ export const StudentManagementView = ({ isMobile }) => {
               >
                 <option value="All">All Batches</option>
                 {(batches || []).map((b) => (
-                  <option key={b.id} value={b.name}>
+                  <option key={b.id} value={b.id}>
                     {b.name}
                   </option>
                 ))}
@@ -729,7 +731,10 @@ export const StudentManagementView = ({ isMobile }) => {
                       {st.name}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
-                      {resolveBatchName(st)}
+                      {(st.batches || []).length > 0
+                        ? (st.batches || []).join(', ')
+                        : <span style={{ color: '#9CA3AF' }}>—</span>
+                      }
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
                       {st.phone}
