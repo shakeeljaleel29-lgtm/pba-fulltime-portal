@@ -53,61 +53,72 @@ export const StudentManagementView = ({ isMobile }) => {
 
   // ── STUDENT LIST: pull from pba_batches (source of truth) ──
   const buildStudentList = () => {
-    const batchData = safeLS('pba_batches', []);
-    const direct    = safeLS('pba_students', []);
+    const rawBatches  = safeLS('pba_batches',  []);
+    const rawStudents = safeLS('pba_students', []);
+    const batches = Array.isArray(rawBatches)  ? rawBatches  : [];
+    const direct  = Array.isArray(rawStudents) ? rawStudents : [];
 
-    // Map: key (id or regNo) → merged student record
+    // Map keyed by student id or regNo
     const map = {};
 
-    // First pass: students explicitly stored in pba_students
-    (direct || []).forEach(s => {
-      const key = s.id || s.regNo;
+    // Helper: get a student's key
+    const getKey = s =>
+      s.id || s.studentId || s.regNo || null;
+
+    // Helper: get enrolled array from a batch (handles all known field names)
+    const getEnrolled = batch =>
+      Array.isArray(batch.students)          ? batch.students
+      : Array.isArray(batch.enrolledStudents) ? batch.enrolledStudents
+      : Array.isArray(batch.studentList)      ? batch.studentList
+      : [];
+
+    // Pass 1 — from pba_students
+    direct.forEach(s => {
+      const key = getKey(s);
       if (!key) return;
       map[key] = {
-        id:          s.id || s.regNo,
-        regNo:       s.regNo || '',
-        name:        s.name || '',
-        mobilePhone: s.mobilePhone || s.phone || '',
-        phone:       s.mobilePhone || s.phone || '',
+        id:          key,
+        regNo:       s.regNo       || '',
+        name:        s.name        || s.studentName || '',
+        mobilePhone: s.mobilePhone || s.phone       || '',
+        phone:       s.mobilePhone || s.phone       || '',
         parentPhone: s.parentPhone || '',
-        status:      s.status || 'active',
+        status:      s.status      || 'active',
         batches:     [],
         batchIds:    []
       };
     });
 
-    // Second pass: students found inside batch enrollment records
-    (batchData || []).forEach(batch => {
-      const enrolled = batch.students || batch.enrolledStudents || [];
-      (enrolled || []).forEach(s => {
-        const key = s.id || s.studentId || s.regNo;
+    // Pass 2 — from pba_batches enrollment
+    batches.forEach(batch => {
+      const enrolled = getEnrolled(batch);
+      enrolled.forEach(s => {
+        const key = getKey(s);
         if (!key) return;
-
         if (!map[key]) {
           map[key] = {
-            id:          s.id || s.studentId || s.regNo,
-            regNo:       s.regNo || '',
-            name:        s.name || s.studentName || '',
-            mobilePhone: s.mobilePhone || s.phone || '',
-            phone:       s.mobilePhone || s.phone || '',
+            id:          key,
+            regNo:       s.regNo       || '',
+            name:        s.name        || s.studentName || '',
+            mobilePhone: s.mobilePhone || s.phone       || '',
+            phone:       s.mobilePhone || s.phone       || '',
             parentPhone: s.parentPhone || '',
-            status:      s.status || 'active',
+            status:      s.status      || 'active',
             batches:     [],
             batchIds:    []
           };
         }
-
-        // Add this batch to the student's batch list (avoid duplicates)
-        if (batch.name && !(map[key].batches || []).includes(batch.name)) {
-          map[key].batches.push(batch.name);
-          map[key].batchIds.push(batch.id);
+        const bName = batch.name || '';
+        if (bName && !map[key].batches.includes(bName)) {
+          map[key].batches.push(bName);
+          map[key].batchIds.push(batch.id || '');
         }
       });
     });
 
-    // Third pass: AppContext students not yet in either store
+    // Pass 3 — AppContext students not yet in either store
     (data.students || []).forEach(s => {
-      const key = s.id || s.regNo;
+      const key = getKey(s);
       if (!key || map[key]) return;
       map[key] = {
         ...s,
@@ -222,25 +233,27 @@ export const StudentManagementView = ({ isMobile }) => {
     setShowImportModal(true);
   };
 
+  // Batch match — case-insensitive, checks batches array OR legacy fields
+  const batchMatch = (s) => {
+    if (!filterBatch || filterBatch === '' || filterBatch === 'All') return true;
+    const q = filterBatch.toLowerCase();
+    if ((s.batches || []).some(bn => (bn || '').toLowerCase() === q)) return true;
+    if ((s.batchName || '').toLowerCase() === q) return true;
+    if ((s.batchId   || '').toLowerCase() === q) return true;
+    if ((s.batch     || '').toLowerCase() === q) return true;
+    return false;
+  };
+
   const filteredStudents = (students || []).filter((st) => {
-    // Batch filter — match by name
-    if (filterBatch && filterBatch !== '' && filterBatch !== 'All') {
-      const inBatch = (st.batches || []).some(bn => bn === filterBatch);
-      if (!inBatch) return false;
-    }
-    // Search filter
+    if (!batchMatch(st)) return false;
     if (searchQuery && searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase();
-      const matchName = (st.name  || '').toLowerCase().includes(q);
-      const matchReg  = (st.regNo || '').toLowerCase().includes(q);
-      const matchPhone = (st.mobilePhone || st.phone || '').includes(q);
-      if (!matchName && !matchReg && !matchPhone) return false;
+      if (!(st.name  || '').toLowerCase().includes(q) &&
+          !(st.regNo || '').toLowerCase().includes(q) &&
+          !(st.mobilePhone || st.phone || '').includes(q)) return false;
     }
-    // Status filter
     if (filterStatus && filterStatus !== 'All') {
-      const stStatus = (st.status || '').toLowerCase();
-      const fStatus  = filterStatus.toLowerCase();
-      if (stStatus !== fStatus) return false;
+      if ((st.status || '').toLowerCase() !== filterStatus.toLowerCase()) return false;
     }
     return true;
   });
