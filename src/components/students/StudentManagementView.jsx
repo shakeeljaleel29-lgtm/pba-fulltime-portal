@@ -55,6 +55,75 @@ export const StudentManagementView = ({ isMobile }) => {
     setBatches(safeLS('pba_batches', []));
   }, []);
 
+  // Merge students from pba_students AND pba_batches enrollment records
+  const getMergedStudents = () => {
+    const directStudents = safeLS('pba_students', []);
+    const currentBatches = safeLS('pba_batches', []);
+    const contextStudents = data.students || [];
+
+    // Build a unified set starting from context (AppContext) students
+    const merged = [...contextStudents];
+    const mergedIds = new Set((contextStudents).map(s => s.id));
+    const mergedRegs = new Set((contextStudents).map(s => s.regNo).filter(Boolean));
+
+    // Add students from pba_students not already in context
+    (directStudents || []).forEach(s => {
+      if (!mergedIds.has(s.id) && !(s.regNo && mergedRegs.has(s.regNo))) {
+        merged.push(s);
+        mergedIds.add(s.id);
+        if (s.regNo) mergedRegs.add(s.regNo);
+      }
+    });
+
+    // Add students enrolled via batch manager (pba_batches[].students)
+    (currentBatches || []).forEach(batch => {
+      const enrolled = batch.students || batch.enrolledStudents || [];
+      (enrolled || []).forEach(s => {
+        const sid = s.id || s.studentId;
+        const regNo = s.regNo || '';
+        if (!mergedIds.has(sid) && !(regNo && mergedRegs.has(regNo))) {
+          merged.push({
+            id: sid,
+            regNo: regNo,
+            name: s.name || s.studentName || '',
+            batchId: batch.id,
+            batchName: batch.name,
+            phone: s.mobilePhone || s.phone || '',
+            mobilePhone: s.mobilePhone || s.phone || '',
+            parentPhone: s.parentPhone || '',
+            status: s.status || 'Active',
+            enrolledAt: s.enrolledAt || ''
+          });
+          mergedIds.add(sid);
+          if (regNo) mergedRegs.add(regNo);
+        }
+      });
+    });
+
+    // Also pull from pba_batch_enrollments (the Batch Manager enrollment table)
+    const batchEnrollments = safeLS('pba_batch_enrollments', []);
+    (batchEnrollments || []).filter(e => e.status === 'active').forEach(enr => {
+      if (!mergedIds.has(enr.studentId)) {
+        // Try to find base student data from context
+        const base = contextStudents.find(s => s.id === enr.studentId);
+        const batchObj = (currentBatches || []).find(b => b.id === enr.batchId);
+        if (base) {
+          // Update existing record with batch info if it was missing
+          const existIdx = merged.findIndex(s => s.id === base.id);
+          if (existIdx >= 0 && !merged[existIdx].batchId) {
+            merged[existIdx] = {
+              ...merged[existIdx],
+              batchId: enr.batchId,
+              batchName: batchObj?.name || enr.batchId
+            };
+          }
+        }
+      }
+    });
+
+    return merged;
+  };
+
   // Filters
   const [filterBatch, setFilterBatch] = useState("All");
   const [filterStatus, setFilterStatus] = useState("All");
@@ -147,7 +216,9 @@ export const StudentManagementView = ({ isMobile }) => {
     setShowImportModal(true);
   };
 
-  const filteredStudents = (data.students || []).filter((st) => {
+  const allStudents = getMergedStudents();
+
+  const filteredStudents = (allStudents || []).filter((st) => {
     const stBatchName = resolveBatchName(st);
     const matchesBatch =
       filterBatch === "All" ||
@@ -159,7 +230,7 @@ export const StudentManagementView = ({ isMobile }) => {
     const matchesQuery =
       (st.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (st.regNo || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (st.phone || "").includes(searchQuery);
+      (st.phone || st.mobilePhone || "").includes(searchQuery);
     return matchesBatch && matchesStatus && matchesQuery;
   });
 

@@ -673,7 +673,6 @@ export const GeneralAdminView = ({ isMobile }) => {
       branch: getBranches()[0] || "Kohuwala",
       curriculum: getCurricula()[0] || "Cambridge",
       level: getLevels()[0] || "O Level",
-      capacity: 40,
       color: nextColor,
       isActive: true,
       batchSubjects: [],
@@ -712,7 +711,6 @@ export const GeneralAdminView = ({ isMobile }) => {
       branch: b.branch || getBranches()[0] || "Kohuwala",
       curriculum: b.curriculum || getCurricula()[0] || "Cambridge",
       level: b.level || getLevels()[0] || "O Level",
-      capacity: b.capacity || 40,
       color: b.color || "#2B6CB0",
       isActive: b.isActive !== false,
       batchSubjects: formattedSubjs,
@@ -1624,14 +1622,6 @@ export const GeneralAdminView = ({ isMobile }) => {
               const schedCount = new Set(sessions.filter((s) => s.batchId === batch.id).map((s) => s.subjectId)).size;
 
               const activeEnrollments = batchEnrollments.filter((e) => e.batchId === batch.id && e.status === "active");
-              const capacity = batch.capacity || 40;
-              const pct = Math.min((activeEnrollments.length / capacity) * 100, 100);
-              const barColor =
-                activeEnrollments.length >= capacity
-                  ? "#C53030"
-                  : activeEnrollments.length >= capacity * 0.8
-                  ? "#B7860A"
-                  : "#276749";
 
               let lvlBg = "#EBF4FF";
               let lvlColor = "#2B6CB0";
@@ -1678,17 +1668,17 @@ export const GeneralAdminView = ({ isMobile }) => {
                       Curriculum: {batch.curriculum}
                     </div>
 
-                    {/* ENROLLMENT COUNT & PROGRESS BAR */}
+                    {/* ENROLLMENT COUNT */}
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", marginBottom: "10px" }}>
                       <span style={{ fontSize: "12px", color: "#718096", whiteSpace: "nowrap" }}>
-                        👤 {activeEnrollments.length} / {capacity} students
+                        👤 {activeEnrollments.length} students enrolled
                       </span>
                       <div style={{ flex: 1, height: "6px", background: "#E3E6EA", borderRadius: "3px", overflow: "hidden" }}>
                         <div
                           style={{
                             height: "100%",
-                            width: `${pct}%`,
-                            background: barColor,
+                            width: activeEnrollments.length > 0 ? "100%" : "0%",
+                            background: "#276749",
                             borderRadius: "3px",
                             transition: "width 0.3s ease"
                           }}
@@ -1864,7 +1854,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                         </div>
                       </div>
 
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "14px" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
                         <div>
                           <label style={{ display: "block", fontSize: "10px", fontWeight: 700, color: "#718096", textTransform: "uppercase", marginBottom: "4px" }}>Level</label>
                           <select
@@ -1876,18 +1866,6 @@ export const GeneralAdminView = ({ isMobile }) => {
                               <option key={l} value={l}>{l}</option>
                             ))}
                           </select>
-                        </div>
-
-                        <div>
-                          <label style={{ display: "block", fontSize: "10px", fontWeight: 700, color: "#718096", textTransform: "uppercase", marginBottom: "4px" }}>CLASS CAPACITY</label>
-                          <input
-                            type="number"
-                            min="1"
-                            max="200"
-                            value={batchForm.capacity || 40}
-                            onChange={(e) => setBatchForm({ ...batchForm, capacity: parseInt(e.target.value) || 40 })}
-                            style={{ width: "100%", padding: "8px 10px", border: "1px solid #E3E6EA", borderRadius: "7px", fontSize: "13px" }}
-                          />
                         </div>
 
                         <div>
@@ -3626,7 +3604,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                   Students — {enrolledPanelBatch.name}
                 </h3>
                 <div style={{ fontSize: "12px", color: "#718096", marginTop: "2px" }}>
-                  {batchEnrollments.filter(e => e.batchId === enrolledPanelBatch.id && e.status === "active").length} / {enrolledPanelBatch.capacity || 40} enrolled
+                  {batchEnrollments.filter(e => e.batchId === enrolledPanelBatch.id && e.status === "active").length} enrolled
                 </div>
               </div>
               <button onClick={() => setEnrolledPanelBatch(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A0AEC0" }}>
@@ -3953,6 +3931,35 @@ export const GeneralAdminView = ({ isMobile }) => {
                   const updated = [...batchEnrollments, ...newEnrollments];
                   setBatchEnrollments(updated);
                   saveLS("pba_batch_enrollments", updated);
+
+                  // ── Sync enrolled students to pba_students ──
+                  const existingStudentRecords = safeLS('pba_students', []);
+                  const updatedStudentRecords = [...(existingStudentRecords || [])];
+                  enrollSelectedStudentIds.forEach(stId => {
+                    const st = (data.students || []).find(s => s.id === stId);
+                    if (!st) return;
+                    const existingIdx = updatedStudentRecords.findIndex(
+                      s => s.id === stId || (st.regNo && s.regNo === st.regNo)
+                    );
+                    const studentRecord = {
+                      id: stId,
+                      regNo: st.regNo || '',
+                      name: st.name || '',
+                      batchId: enrolledPanelBatch.id,
+                      batchName: enrolledPanelBatch.name,
+                      mobilePhone: st.phone || st.mobilePhone || '',
+                      parentPhone: st.parentPhone || '',
+                      status: 'Active',
+                      enrolledAt: nowIso.slice(0, 10)
+                    };
+                    if (existingIdx >= 0) {
+                      updatedStudentRecords[existingIdx] = { ...updatedStudentRecords[existingIdx], ...studentRecord };
+                    } else {
+                      updatedStudentRecords.push(studentRecord);
+                    }
+                  });
+                  saveLS('pba_students', updatedStudentRecords);
+                  // ── End sync ──
 
                   setShowEnrollModal(false);
                   triggerToast(`✓ Enrolled ${enrollSelectedStudentIds.length} student(s) into ${enrolledPanelBatch.name}`);
