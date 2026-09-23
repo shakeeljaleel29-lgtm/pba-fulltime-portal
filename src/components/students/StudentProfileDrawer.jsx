@@ -138,34 +138,49 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   };
 
-  const formatEnrollDate = (dStr, format = 'short') => {
-    if (!dStr) return 'N/A';
-    const d = new Date(dStr);
-    if (isNaN(d.getTime())) return String(dStr);
-    const day = String(d.getDate()).padStart(2, '0');
-    const monthsShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthsLong = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    if (format === 'long') {
-      return `${day} ${monthsLong[d.getMonth()]} ${d.getFullYear()}`;
+  // Safe date formatter — avoids UTC midnight shift by splitting on '-'
+  const formatDate = (raw, format = 'short') => {
+    if (!raw) return 'N/A';
+    try {
+      const parts = String(raw).split('T')[0].split('-');
+      if (parts.length === 3) {
+        const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        if (isNaN(d.getTime())) return String(raw);
+        const day = String(d.getDate()).padStart(2, '0');
+        const monthsShort = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const monthsLong  = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+        return format === 'long'
+          ? `${day} ${monthsLong[d.getMonth()]} ${d.getFullYear()}`
+          : `${day} ${monthsShort[d.getMonth()]} ${d.getFullYear()}`;
+      }
+      return String(raw);
+    } catch (_) {
+      return raw ? String(raw) : 'N/A';
     }
-    return `${day} ${monthsShort[d.getMonth()]} ${d.getFullYear()}`;
   };
+  // Keep legacy alias so other tabs that call formatEnrollDate still work
+  const formatEnrollDate = (dStr, format = 'short') => formatDate(dStr, format);
 
+
+  // Safe DOB formatter — avoids UTC shift via split/3-arg constructor
   const getDobWithAge = (rawDob) => {
     if (!rawDob) return null;
-    const dob = new Date(rawDob);
-    if (isNaN(dob.getTime())) return String(rawDob);
-    const today = new Date();
-    let age = today.getFullYear() - dob.getFullYear();
-    const m = today.getMonth() - dob.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
-      age--;
+    try {
+      const parts = String(rawDob).split('T')[0].split('-');
+      if (parts.length !== 3) return String(rawDob);
+      const dob = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      if (isNaN(dob.getTime())) return String(rawDob);
+      const today = new Date();
+      let age = today.getFullYear() - dob.getFullYear();
+      if (today < new Date(today.getFullYear(), dob.getMonth(), dob.getDate())) age--;
+      const day = String(dob.getDate()).padStart(2, '0');
+      const monthsLong = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+      return `${day} ${monthsLong[dob.getMonth()]} ${dob.getFullYear()} (Age: ${age})`;
+    } catch (_) {
+      return rawDob ? String(rawDob) : null;
     }
-    const day = String(dob.getDate()).padStart(2, '0');
-    const monthsLong = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    const formatted = `${day} ${monthsLong[dob.getMonth()]} ${dob.getFullYear()}`;
-    return `${formatted} (Age: ${age})`;
   };
+
 
   const studentFees = data.studentFees.filter((f) => f.studentId === student.id);
   const studentDiscipline = data.disciplineRecords.filter((d) => d.studentId === student.id);
@@ -383,18 +398,51 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
 
             const totalBatchCount = Math.max(liveBatchCount, batchLabels.length);
 
-            // Personal Information fields
-            const dobDisplay = getDobWithAge(student.dateOfBirth || student.dob);
-            const enrolledDateFormatted = formatEnrollDate(student.enrollmentDate || student.enrolmentDate, 'long');
+            // ── Enroll date — all possible field-name variants, safe parsing ──
+            const rawEnrollDate =
+              student.enrollmentDate  ||
+              student.enrolledDate    ||
+              student.enrollDate      ||
+              student.dateEnrolled    ||
+              student.startDate       ||
+              student.admissionDate   ||
+              student.createdAt       ||
+              null;
+
+            // ── Personal info — all possible field-name variants ──
+            const studentBranch =
+              student.branch || student.branchName || student.campus || '';
+
+            const studentDOB =
+              student.dateOfBirth || student.dob || student.birthDate ||
+              student.birthdate   || student.birthday || null;
+
+            const studentEmail =
+              student.email || student.emailAddress ||
+              student.studentEmail || '';
+
+            const studentPhone =
+              student.phone       || student.studentPhone ||
+              student.phoneNo     || student.mobile || student.mobileNo || '';
+
+            const parentPhone =
+              student.parentPhone   || student.guardianPhone ||
+              student.parentMobile  || student.motherPhone ||
+              student.fatherPhone   || '';
+
+            // ── Personal Information card rows (order: Branch → DOB → Phone → ParentPhone → Email → Enrolled) ──
+            const dobDisplay = getDobWithAge(studentDOB);
+            const enrolledDateFormatted = formatDate(rawEnrollDate, 'long');
 
             const personalFields = [
-              { icon: '📍', label: 'Branch', value: student.branch },
-              { icon: '🎂', label: 'Date of Birth', value: dobDisplay },
-              { icon: '📱', label: 'Student Phone', value: student.phone || student.studentPhone },
-              { icon: '📱', label: 'Parent Phone', value: student.parentPhone || student.guardianPhone },
-              { icon: '✉️', label: 'Email', value: student.email },
-              { icon: '📅', label: 'Enrolled', value: enrolledDateFormatted !== 'N/A' ? enrolledDateFormatted : null }
+              { icon: '📍', label: 'Branch',         value: studentBranch || '' },
+              { icon: '🎂', label: 'Date of Birth',  value: dobDisplay || '' },
+              { icon: '📱', label: 'Student Phone',  value: studentPhone || '' },
+              { icon: '📱', label: 'Parent Phone',   value: parentPhone || '' },
+              { icon: '✉️', label: 'Email',          value: studentEmail || '' },
+              { icon: '📅', label: 'Enrolled',       value: rawEnrollDate ? enrolledDateFormatted : '' }
             ].filter(f => f.value && String(f.value).trim() !== '');
+
 
             const isNarrowDrawer = isMobileState || (typeof window !== 'undefined' && window.innerWidth < 640);
 
@@ -447,7 +495,21 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                       color: 'white',
                       display: 'inline-block'
                     }}>
-                      {batchLabels[0] || 'No batch assigned'} · {student.branch || 'Main Branch'}
+                    {(() => {
+                      const studentId = (student.id || student.regNo || student.studentId || '').toString();
+                      const enrolledBatches = (safeLS('pba_batches', []) || []).filter(b =>
+                        (b.students || []).some(s =>
+                          (s.id || s.regNo || s.studentId || '').toString() === studentId
+                        )
+                      );
+                      const primaryBatch = enrolledBatches[0] || null;
+                      const batchChipText = primaryBatch
+                        ? `${primaryBatch.name}${studentBranch ? ' · ' + studentBranch : ''}`
+                        : (batchLabels[0]
+                          ? `${batchLabels[0]}${studentBranch ? ' · ' + studentBranch : ''}`
+                          : (studentBranch || 'No batch assigned'));
+                      return batchChipText;
+                    })()}
                     </div>
                   </div>
 
@@ -490,7 +552,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                       textTransform: 'uppercase', letterSpacing: '0.5px'
                     }}>Enrolled</div>
                     <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827' }}>
-                      {formatEnrollDate(student.enrollmentDate || student.enrolmentDate, 'short')}
+                      {formatDate(rawEnrollDate, 'short')}
                     </div>
                   </div>
 

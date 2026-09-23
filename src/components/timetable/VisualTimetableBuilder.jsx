@@ -1413,6 +1413,19 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                   ? { bg: rawCol.bg || '#EFF6FF', border: rawCol.border || '#BFDBFE', text: rawCol.text || '#1D4ED8' }
                   : { bg: '#EFF6FF', border: '#BFDBFE', text: rawCol || '#1D4ED8' };
 
+                // ── Card-level derived variables (needed in both branches) ──────────
+                const batchObj = (allBatches || []).find((b) => b?.id === sess?.batchId) || {};
+                const subject  = (subjects  || []).find((s) => s?.id === sess?.subjectId);
+                const rawSubName  = subject?.name || '';
+                const hasNoSubject = !sess?.subjectId || !subject;
+                const cardTitle    = hasNoSubject
+                  ? (sess?.subjectId ? 'Unknown Subject' : 'No Subject')
+                  : rawSubName;
+                const classroomName = sess?.classroomName || sess?.room || '—';
+                const lecturerName  = sess?.lecturerName ||
+                  (allLecturers || []).find((u) => u?.id === sess?.lecturerId)?.name || '—';
+                const batchName = sess?.batchName || batchObj?.name || sess?.batchId || '';
+
                 if (isAllBatchesMode) {
                   return (
                     <div
@@ -1454,7 +1467,7 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                         paddingBottom: '2px',
                         marginBottom: '2px'
                       }}>
-                        {batch?.name || sess.batchName || sess.batchId}
+                        {batchObj?.name || sess?.batchName || sess?.batchId}
                       </div>
 
                       {/* Subject */}
@@ -1536,7 +1549,7 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                       height: `${heightPx}px`,
                       background: '#FFFFFF',
                       border: '1.5px solid #BEE3F8',
-                      borderLeft: `4px solid ${batch?.color || sess.color || '#2B6CB0'}`,
+                      borderLeft: `4px solid ${batchObj?.color || sess?.color || '#2B6CB0'}`,
                       borderRadius: '6px',
                       padding: '5px 7px',
                       boxSizing: 'border-box',
