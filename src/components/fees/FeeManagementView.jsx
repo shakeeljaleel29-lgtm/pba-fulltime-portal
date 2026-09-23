@@ -5,6 +5,22 @@ import { printFeeReceiptPDF } from "../../utils/pdfGenerator";
 
 import { T, theme, type as t } from "../../theme";
 
+const safeLS = (key, fallback = []) => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null || raw === undefined || raw === '') return fallback;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(fallback)) return Array.isArray(parsed) ? parsed : fallback;
+    if (typeof fallback === 'object') return (parsed && typeof parsed === 'object') ? parsed : fallback;
+    return parsed ?? fallback;
+  } catch { return fallback; }
+};
+
+const saveLS = (key, val) => {
+  try { localStorage.setItem(key, JSON.stringify(val)); }
+  catch (err) { console.error('saveLS error:', err); }
+};
+
 export const FeeManagementView = ({ isMobile }) => {
   const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
   const { data, recordFeePayment, exportToCSV, showToast } = useApp();
@@ -22,6 +38,70 @@ export const FeeManagementView = ({ isMobile }) => {
   // Reminder Modal State
   const [reminderModalFee, setReminderModalFee] = useState(null);
   const [filterBatch, setFilterBatch] = useState("All");
+  // ── Fee Structure CRUD ──────────────────────────────────────
+  const [feeStructureModal, setFeeStructureModal] = useState(false);
+  const [editingFeeStructure, setEditingFeeStructure] = useState(null);
+  const [feeStructureForm, setFeeStructureForm] = useState({
+    batchId: '', feeName: '', amount: '', frequency: 'Monthly', mandatory: true
+  });
+  const [fsRefresh, setFsRefresh] = useState(0);
+
+  const feeStructures = safeLS('pba_fee_structures', []);
+
+  const openFeeStructureModal = (existing) => {
+    if (existing) {
+      setEditingFeeStructure(existing);
+      setFeeStructureForm({
+        batchId:   existing.batchId   || '',
+        feeName:   existing.feeName   || '',
+        amount:    existing.amount    || '',
+        frequency: existing.frequency || 'Monthly',
+        mandatory: existing.mandatory !== false
+      });
+    } else {
+      setEditingFeeStructure(null);
+      setFeeStructureForm({ batchId: '', feeName: '', amount: '', frequency: 'Monthly', mandatory: true });
+    }
+    setFeeStructureModal(true);
+  };
+
+  const saveFeeStructure = () => {
+    if (!feeStructureForm.batchId || !feeStructureForm.feeName || !feeStructureForm.amount) {
+      alert('Please fill in Batch, Fee Name, and Amount.');
+      return;
+    }
+    const allBatches = safeLS('pba_batches', []) || [];
+    const batch = allBatches.find(b => b.id === feeStructureForm.batchId);
+    const batchName = batch?.name || feeStructureForm.batchId;
+    const existing = safeLS('pba_fee_structures', []) || [];
+    let updated;
+    if (editingFeeStructure) {
+      updated = existing.map(fs =>
+        fs.id === editingFeeStructure.id
+          ? { ...fs, ...feeStructureForm, batchName, amount: parseFloat(feeStructureForm.amount) || 0 }
+          : fs
+      );
+    } else {
+      updated = [...existing, {
+        id: Date.now().toString(),
+        ...feeStructureForm,
+        batchName,
+        amount: parseFloat(feeStructureForm.amount) || 0
+      }];
+    }
+    saveLS('pba_fee_structures', updated);
+    setFeeStructureModal(false);
+    setFsRefresh(r => r + 1);
+  };
+
+  const deleteFeeStructure = (id) => {
+    if (!window.confirm('Delete this fee structure?')) return;
+    const existing = safeLS('pba_fee_structures', []) || [];
+    saveLS('pba_fee_structures', existing.filter(fs => fs.id !== id));
+    setFsRefresh(r => r + 1);
+  };
+  // ────────────────────────────────────────────────────────────
+
 
   const totalOutstanding = data.studentFees
     .filter((f) => f.status !== "Paid")
@@ -149,7 +229,7 @@ export const FeeManagementView = ({ isMobile }) => {
             Active Fee Structures
           </div>
           <div style={{ fontFamily: t.fontHeading, fontSize: "28px", fontWeight: 800, color: theme.accent, marginTop: "4px" }}>
-            3
+            {(safeLS('pba_fee_structures', []) || []).length}
           </div>
           <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>Batch fee schedules</div>
         </div>
@@ -465,10 +545,21 @@ export const FeeManagementView = ({ isMobile }) => {
             <span style={{ fontFamily: t.fontHeading, fontSize: "15px", fontWeight: 600, color: theme.textPrimary, display: "flex", alignItems: "center", gap: "8px" }}>
               <DollarSign size={18} style={{ color: theme.accent }} /> Batch Fee Structures
             </span>
+            <button
+              onClick={() => openFeeStructureModal(null)}
+              style={{
+                background: '#2563EB', color: 'white',
+                border: 'none', borderRadius: '8px',
+                padding: '8px 16px', fontSize: '13px', fontWeight: 600,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
+              }}
+            >
+              + Add Fee Structure
+            </button>
           </div>
 
           <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
-            <table style={{ minWidth: "600px", width: "100%", borderCollapse: "collapse" }}>
+            <table style={{ minWidth: "700px", width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#F8F9FA" }}>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Batch</th>
@@ -476,10 +567,17 @@ export const FeeManagementView = ({ isMobile }) => {
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Amount (LKR)</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Frequency</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Mandatory</th>
+                  <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {data.feeStructures.map((fs) => (
+                {feeStructures.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '32px', color: '#9CA3AF', fontSize: '14px' }}>
+                      No fee structures yet. Click "+ Add Fee Structure" to create one.
+                    </td>
+                  </tr>
+                ) : feeStructures.map((fs) => (
                   <tr
                     key={fs.id}
                     style={{ transition: "background 0.15s" }}
@@ -487,26 +585,133 @@ export const FeeManagementView = ({ isMobile }) => {
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                   >
                     <td style={{ padding: '13px 16px', fontSize: '13px', fontWeight: 600, color: theme.textPrimary, borderBottom: '1px solid #F4F5F7' }}>
-                      {fs.batch}
+                      {fs.batchName || fs.batch}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textPrimary, borderBottom: '1px solid #F4F5F7' }}>
-                      {fs.name}
+                      {fs.feeName || fs.name}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', fontWeight: 700, color: theme.textPrimary, borderBottom: '1px solid #F4F5F7' }}>
-                      LKR {fs.amount.toLocaleString()}
+                      LKR {(fs.amount || 0).toLocaleString()}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
                       {fs.frequency}
                     </td>
                     <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
-                      <span style={{ background: theme.successLight, color: theme.success, border: '1px solid ' + theme.successBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
-                        Mandatory
-                      </span>
+                      {fs.mandatory !== false ? (
+                        <span style={{ background: theme.successLight, color: theme.success, border: '1px solid ' + theme.successBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>Mandatory</span>
+                      ) : (
+                        <span style={{ background: '#F3F4F6', color: '#6B7280', border: '1px solid #E5E7EB', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>Optional</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          onClick={() => openFeeStructureModal(fs)}
+                          style={{ background: '#F3F4F6', border: '1px solid #E5E7EB', borderRadius: '6px', padding: '5px 10px', fontSize: '12px', cursor: 'pointer', color: '#374151' }}
+                        >✏ Edit</button>
+                        <button
+                          onClick={() => deleteFeeStructure(fs.id)}
+                          style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', padding: '5px 10px', fontSize: '12px', cursor: 'pointer', color: '#DC2626' }}
+                        >🗑 Delete</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Fee Structure Create/Edit Modal */}
+      {feeStructureModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: 'white', borderRadius: '16px', padding: '28px 32px', width: '480px', maxWidth: '90vw', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#111827' }}>
+                {editingFeeStructure ? 'Edit Fee Structure' : 'Add Fee Structure'}
+              </h3>
+              <button onClick={() => setFeeStructureModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#6B7280' }}>×</button>
+            </div>
+
+            {/* Batch */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Batch *</label>
+              <select
+                value={feeStructureForm.batchId}
+                onChange={e => setFeeStructureForm(f => ({ ...f, batchId: e.target.value }))}
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', background: 'white', boxSizing: 'border-box' }}
+              >
+                <option value=''>— Select batch —</option>
+                {(safeLS('pba_batches', []) || []).map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Fee Name */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Fee Name *</label>
+              <input
+                type='text'
+                placeholder='e.g. Monthly Programme Fee'
+                value={feeStructureForm.feeName}
+                onChange={e => setFeeStructureForm(f => ({ ...f, feeName: e.target.value }))}
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            {/* Amount */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Amount (LKR) *</label>
+              <input
+                type='number'
+                placeholder='e.g. 15000'
+                value={feeStructureForm.amount}
+                onChange={e => setFeeStructureForm(f => ({ ...f, amount: e.target.value }))}
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            {/* Frequency */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Frequency</label>
+              <select
+                value={feeStructureForm.frequency}
+                onChange={e => setFeeStructureForm(f => ({ ...f, frequency: e.target.value }))}
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', background: 'white', boxSizing: 'border-box' }}
+              >
+                <option>Monthly</option>
+                <option>Per Term</option>
+                <option>Annual</option>
+                <option>One-time</option>
+              </select>
+            </div>
+
+            {/* Mandatory */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}>
+              <input
+                type='checkbox'
+                id='fsMandatory'
+                checked={feeStructureForm.mandatory}
+                onChange={e => setFeeStructureForm(f => ({ ...f, mandatory: e.target.checked }))}
+                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+              />
+              <label htmlFor='fsMandatory' style={{ fontSize: '14px', fontWeight: 500, color: '#374151', cursor: 'pointer' }}>Mandatory fee</label>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setFeeStructureModal(false)}
+                style={{ padding: '10px 20px', background: '#F3F4F6', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: '14px', fontWeight: 600, cursor: 'pointer', color: '#374151' }}
+              >Cancel</button>
+              <button
+                onClick={saveFeeStructure}
+                style={{ padding: '10px 24px', background: '#2563EB', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 600, cursor: 'pointer', color: 'white' }}
+              >{editingFeeStructure ? 'Save Changes' : 'Add Fee Structure'}</button>
+            </div>
           </div>
         </div>
       )}

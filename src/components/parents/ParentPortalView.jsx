@@ -72,6 +72,27 @@ export const ParentPortalView = ({ isMobile }) => {
   const studentsList = data?.students || [];
   const batchesList = data?.batches || [];
 
+  // Returns the live enrolled batch name for a student from pba_batches
+  const getStudentBatchName = (st) => {
+    if (!st) return 'No batch assigned';
+    const studentIdStr = (st.id || st.regNo || st.studentId || '').toString();
+    const batches = safeLS('pba_batches', []) || [];
+    const enrolled = batches.filter(b =>
+      (b.students || []).some(s =>
+        (s.id || s.regNo || s.studentId || '').toString() === studentIdStr
+      )
+    );
+    return enrolled[0]?.name
+      || st.batchName
+      || st.batch
+      || st.batchId
+      || 'No batch assigned';
+  };
+
+  // Returns the branch from all possible field variants
+  const getStudentBranch = (st) =>
+    st?.branch || st?.branchName || st?.campus || '';
+
   return (
     <div>
       {selectedStudent && <ParentSummaryView student={selectedStudent} onClose={() => setSelectedStudent(null)} />}
@@ -194,7 +215,7 @@ export const ParentPortalView = ({ isMobile }) => {
                       {st.name}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
-                      {st.batch}
+                      {getStudentBatchName(st)}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
                       {st.parentPhone}
