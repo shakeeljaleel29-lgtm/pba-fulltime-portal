@@ -134,9 +134,80 @@ export const StudentManagementView = ({ isMobile }) => {
 
   const [students, setStudents] = useState(() => buildStudentList());
 
+  // ── FIX 3: Backfill — repair students already imported before this fix ──
   useEffect(() => {
-    const batchData = safeLS('pba_batches', []);
-    setBatches(batchData);
+    const _pbaStudents = safeLS('pba_students', []);
+    const _ctxStudents = Array.isArray(data?.students) ? data.students : [];
+    // Combine unique students from pba_students and data.students
+    const _studentMap = {};
+    (_ctxStudents || []).forEach(s => {
+      const k = s.id || s.regNo;
+      if (k) _studentMap[k] = s;
+    });
+    (_pbaStudents || []).forEach(s => {
+      const k = s.id || s.regNo;
+      if (k) _studentMap[k] = { ..._studentMap[k], ...s };
+    });
+    const _allStudents = Object.values(_studentMap);
+    const _allBatches  = safeLS('pba_batches',  []);
+
+    if (!_allStudents?.length || !_allBatches?.length) {
+      setBatches(safeLS('pba_batches', []));
+      setStudents(buildStudentList());
+      return;
+    }
+
+    let _changed = false;
+    const _batchMap = {};
+    (_allBatches || []).forEach(b => { _batchMap[b.id] = b; });
+
+    (_allStudents || []).forEach(student => {
+      const batchRef = student.batchId || student.batch
+                    || student.batchEnrolled || student.batchName;
+      if (!batchRef) return;
+
+      // Try matching by ID first, then by name
+      const targetBatch =
+        _batchMap[batchRef] ||
+        Object.values(_batchMap).find(b => b.name === batchRef);
+
+      if (!targetBatch) return;
+
+      const sid = student.id || student.regNo;
+      if (!sid) return;
+
+      const existingIds = new Set(
+        (targetBatch.students || []).map(s => s.id || s.regNo)
+      );
+      if (existingIds.has(sid)) return;   // already there — skip
+
+      // Student is missing from this batch — add them
+      _batchMap[targetBatch.id] = {
+        ...targetBatch,
+        students: [
+          ...(targetBatch.students || []),
+          {
+            id:          sid,
+            regNo:       student.regNo       || '',
+            name:        student.name        || student.studentName || '',
+            mobilePhone: student.mobilePhone || student.phone || '',
+            parentPhone: student.parentPhone || '',
+            status:      student.status      || 'active',
+            enrolledAt:  student.enrolledAt  || student.createdAt
+                         || new Date().toISOString()
+          }
+        ]
+      };
+      _changed = true;
+    });
+
+    if (_changed) {
+      const _updated = Object.values(_batchMap);
+      saveLS('pba_batches', _updated);
+      setBatches(_updated);
+    } else {
+      setBatches(_allBatches);
+    }
     setStudents(buildStudentList());
   }, []);
   // ── End student list ──
@@ -307,52 +378,65 @@ export const StudentManagementView = ({ isMobile }) => {
 
     // Save student profile to pba_students
     const existingProfiles = safeLS('pba_students', []);
+    const newStudentProfile = {
+      id:          newStudentId,
+      regNo:       savedStudent.regNo || '',
+      name:        savedStudent.name  || '',
+      mobilePhone: savedStudent.phone || savedStudent.mobilePhone || '',
+      phone:       savedStudent.phone || savedStudent.mobilePhone || '',
+      parentPhone: savedStudent.parentPhone || '',
+      status:      savedStudent.status || 'active',
+      batchId:     finalBatchId || '',
+      batch:       finalBatchName || '',
+      batchName:   finalBatchName || '',
+      batchEnrolled: finalBatchName || '',
+      enrolledAt:  new Date().toISOString()
+    };
     saveLS('pba_students', [
-      {
-        id:          newStudentId,
-        regNo:       savedStudent.regNo || '',
-        name:        savedStudent.name  || '',
-        mobilePhone: savedStudent.phone || savedStudent.mobilePhone || '',
-        phone:       savedStudent.phone || savedStudent.mobilePhone || '',
-        parentPhone: savedStudent.parentPhone || '',
-        status:      'active'
-      },
+      newStudentProfile,
       ...(existingProfiles || [])
     ]);
 
-    // ── Enroll new student into selected batch ──
-    const selectedBatchId = studentForm.batchId
+    // ── FIX 2: Sync new student into pba_batches ──
+    const _newBatchRef = studentForm.batchId
+      || studentForm.batch
+      || studentForm.batchEnrolled
+      || finalBatchId
+      || finalBatchName
       || selectedBatch?.id
-      || studentForm.batch;
+      || selectedBatch?.name;
 
-    if (selectedBatchId) {
-      const allBatches = safeLS('pba_batches', []);
-      const updatedBatches = (allBatches || []).map(batch => {
-        if (batch.id !== selectedBatchId && batch.name !== selectedBatchId) return batch;
-        const alreadyIn = (batch.students || []).some(
-          s => (s.id || s.regNo) === newStudentId
+    if (_newBatchRef) {
+      const _allBatches = safeLS('pba_batches', []);
+      const _updatedBatches = (_allBatches || []).map(batch => {
+        if (batch.id !== _newBatchRef && batch.name !== _newBatchRef)
+          return batch;
+
+        const alreadyIn = (batch.students || []).some(s =>
+          (s.id || s.regNo) === (savedStudent.id || savedStudent.regNo || newStudentId)
         );
         if (alreadyIn) return batch;
+
         return {
           ...batch,
           students: [
             ...(batch.students || []),
             {
-              id:          newStudentId,
+              id:          savedStudent.id || savedStudent.regNo || newStudentId || '',
               regNo:       savedStudent.regNo || '',
-              name:        savedStudent.name  || '',
+              name:        savedStudent.name || '',
               mobilePhone: savedStudent.phone || savedStudent.mobilePhone || '',
               parentPhone: savedStudent.parentPhone || '',
-              status:      'active',
+              status:      savedStudent.status || 'active',
               enrolledAt:  new Date().toISOString()
             }
           ]
         };
       });
-      saveLS('pba_batches', updatedBatches);
-      setBatches(updatedBatches);
+      saveLS('pba_batches', _updatedBatches);
+      setBatches(_updatedBatches);
     }
-    // ── End enroll ──
+    // ── End sync ──
 
     setStudents(buildStudentList());
     setShowAddStudentModal(false);
@@ -435,6 +519,7 @@ export const StudentManagementView = ({ isMobile }) => {
     const existingStudents = data.students || [];
     const newStudents = [...existingStudents];
     const newStudentSubjects = [...(data.studentSubjects || [])];
+    const importedStudentsList = [];
 
     validRows.forEach((r) => {
       if (r.status === "error" && !skipErrors) {
@@ -468,10 +553,14 @@ export const StudentManagementView = ({ isMobile }) => {
         gender: r.gender || "Other",
         nic: r.nic || "",
         phone: r.phone || "0770000000",
+        mobilePhone: r.phone || "0770000000",
         parentPhone: r.parentPhone || "0710000000",
         email: r.email || `${r.name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
         branch: r.branch || "Kohuwala",
-        batch: r.batchName,
+        batchId: r.batchId || "",
+        batch: r.batchName || "",
+        batchName: r.batchName || "",
+        batchEnrolled: r.batchName || "",
         enrolledAt: new Date().toISOString().split("T")[0],
         status: "Active",
         registeredBy: currentUser.name || "Admin",
@@ -480,6 +569,7 @@ export const StudentManagementView = ({ isMobile }) => {
       };
 
       newStudents.push(newStu);
+      importedStudentsList.push(newStu);
 
       subjectsArr.forEach((subjName) => {
         const sObj = (data.subjects || []).find((s) => s.name.toLowerCase() === subjName.toLowerCase());
@@ -500,6 +590,55 @@ export const StudentManagementView = ({ isMobile }) => {
       students: newStudents,
       studentSubjects: newStudentSubjects
     }));
+
+    // ── Save imported students into pba_students ──
+    const existingProfiles = safeLS('pba_students', []);
+    const updatedProfiles = [...importedStudentsList, ...(existingProfiles || [])];
+    saveLS('pba_students', updatedProfiles);
+
+    // ── FIX 1: Sync imported students into pba_batches ──
+    const _importedWithBatch = (importedStudentsList || []).filter(s =>
+      s.batchId || s.batch || s.batchEnrolled
+    );
+
+    if (_importedWithBatch.length > 0) {
+      const _allBatches = safeLS('pba_batches', []);
+      const _updatedBatches = (_allBatches || []).map(batch => {
+        const studentsForThisBatch = _importedWithBatch.filter(s =>
+          (s.batchId || s.batch || s.batchEnrolled) === batch.id ||
+          (s.batchName || s.batchEnrolled) === batch.name
+        );
+        if (studentsForThisBatch.length === 0) return batch;
+
+        const existingStudents = batch.students || [];
+        const existingIds = new Set(
+          existingStudents.map(e => e.id || e.regNo || e.studentId)
+        );
+
+        const newEntries = studentsForThisBatch
+          .filter(s => {
+            const sid = s.id || s.regNo || s.studentId;
+            return sid && !existingIds.has(sid);
+          })
+          .map(s => ({
+            id:          s.id          || s.regNo || s.studentId || '',
+            regNo:       s.regNo       || s.id    || '',
+            name:        s.name        || s.studentName || '',
+            mobilePhone: s.mobilePhone || s.phone || '',
+            parentPhone: s.parentPhone || '',
+            status:      s.status      || 'active',
+            enrolledAt:  new Date().toISOString()
+          }));
+
+        if (newEntries.length === 0) return batch;
+        return { ...batch, students: [...existingStudents, ...newEntries] };
+      });
+      saveLS('pba_batches', _updatedBatches);
+      setBatches(_updatedBatches);
+    }
+    // ── End sync ──
+
+    setStudents(buildStudentList());
 
     setImportLog({ successCount, errorCount, errors });
     setImportStep(2);

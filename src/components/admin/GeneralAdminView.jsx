@@ -557,6 +557,65 @@ export const GeneralAdminView = ({ isMobile }) => {
   }, []);
   // ── End backfill ──
 
+  // ── FIX 3 Backfill: sync pba_students into pba_batches ──
+  useEffect(() => {
+    const _allStudents = safeLS('pba_students', []);
+    const _allBatches  = safeLS('pba_batches',  []);
+
+    if (!_allStudents?.length || !_allBatches?.length) return;
+
+    let _changed = false;
+    const _batchMap = {};
+    (_allBatches || []).forEach(b => { _batchMap[b.id] = b; });
+
+    (_allStudents || []).forEach(student => {
+      const batchRef = student.batchId || student.batch
+                    || student.batchEnrolled || student.batchName;
+      if (!batchRef) return;
+
+      // Try matching by ID first, then by name
+      const targetBatch =
+        _batchMap[batchRef] ||
+        Object.values(_batchMap).find(b => b.name === batchRef);
+
+      if (!targetBatch) return;
+
+      const sid = student.id || student.regNo;
+      if (!sid) return;
+
+      const existingIds = new Set(
+        (targetBatch.students || []).map(s => s.id || s.regNo)
+      );
+      if (existingIds.has(sid)) return;   // already there — skip
+
+      // Student is missing from this batch — add them
+      _batchMap[targetBatch.id] = {
+        ...targetBatch,
+        students: [
+          ...(targetBatch.students || []),
+          {
+            id:          sid,
+            regNo:       student.regNo       || '',
+            name:        student.name        || student.studentName || '',
+            mobilePhone: student.mobilePhone || student.phone || '',
+            parentPhone: student.parentPhone || '',
+            status:      student.status      || 'active',
+            enrolledAt:  student.enrolledAt  || student.createdAt
+                         || new Date().toISOString()
+          }
+        ]
+      };
+      _changed = true;
+    });
+
+    if (_changed) {
+      const updatedBatches = Object.values(_batchMap);
+      saveLS('pba_batches', updatedBatches);
+      setBatches(updatedBatches);
+    }
+  }, []);
+  // ── End pba_batches backfill ──
+
   // Tab 2: Classroom Manager State
   const [clsBranchFilter, setClsBranchFilter] = useState("All");
   const [clsTypeFilter, setClsTypeFilter] = useState("All");
