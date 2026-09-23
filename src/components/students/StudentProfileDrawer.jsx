@@ -37,6 +37,17 @@ const saveLS = (key, val) => {
   }
 };
 
+const resolveBatchName = (batchRef) => {
+  if (!batchRef) return null;
+  const allBatches = safeLS('pba_batches', []);
+  const foundByName = (allBatches || []).find(b => b.name && b.name.toLowerCase() === String(batchRef).toLowerCase());
+  if (foundByName) return foundByName.name;
+  const foundById = (allBatches || []).find(b => b.id === batchRef);
+  if (foundById) return foundById.name;
+  if (!String(batchRef).includes('-') || String(batchRef).length < 20) return String(batchRef);
+  return null;
+};
+
 export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose }) => {
   const { data, linkStudentAccount, currentUser } = useApp();
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -118,7 +129,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
               {student.name} <span style={{ fontSize: "0.85rem", color: "#93C5FD" }}>({student.regNo})</span>
             </h3>
             <div style={{ fontSize: "0.78rem", color: "#CBD5E1" }}>
-              {student.batch} • {student.branch} Branch
+              {(resolveBatchName(student.batch || student.batchId || student.batchName) || student.batch || "No batch assigned")} • {student.branch || "Kohuwala"} Branch
             </div>
           </div>
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -307,42 +318,48 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                   </div>
 
                   {(() => {
+                    const allBatches = safeLS('pba_batches', []);
                     const studentEnrollments = safeLS('pba_batch_enrollments', [])
-                      .filter(e => e.studentId === student.id && e.status === 'active');
+                      .filter(e => (e.studentId === student.id || (student.regNo && e.regNo === student.regNo)) && e.status === 'active');
 
-                    if (studentEnrollments.length === 0) {
-                      return <span style={{ fontSize: '12px', color: '#A0AEC0' }}>Not enrolled in any batch</span>;
+                    const candidateRefs = [
+                      ...(student.batches || []),
+                      ...(studentEnrollments.map(e => e.batchId)),
+                      student.batchId,
+                      student.batchName,
+                      student.batch,
+                      ...((allBatches || [])
+                        .filter(b => (b.students || []).some(s => (s.id && s.id === student.id) || (student.regNo && (s.regNo === student.regNo || s.id === student.regNo))))
+                        .map(b => b.name))
+                    ];
+
+                    const batchLabels = [];
+                    candidateRefs.forEach(ref => {
+                      const resolved = resolveBatchName(ref);
+                      if (resolved && resolved !== 'Unknown Batch' && !batchLabels.includes(resolved)) {
+                        batchLabels.push(resolved);
+                      }
+                    });
+
+                    if (batchLabels.length === 0) {
+                      return <span style={{ color: '#9CA3AF', fontSize: '13px' }}>No batch assigned</span>;
                     }
 
-                    const allBatches = safeLS('pba_batches', []);
                     return (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
-                        {studentEnrollments.map(enrollment => {
-                          const batch = allBatches.find(b => b.id === enrollment.batchId);
-                          return (
-                            <span key={enrollment.id} style={{
-                              display: 'inline-flex', alignItems: 'center', gap: '5px',
-                              background: batch?.color ? batch.color + '20' : '#EBF4FF',
-                              color: '#2B6CB0',
-                              border: '1px solid #BEE3F8',
-                              borderRadius: '20px',
-                              padding: '3px 10px',
-                              fontSize: '11px', fontWeight: 600
-                            }}>
-                              {batch?.name || 'Unknown Batch'}
-                              {enrollment.stream && (
-                                <span style={{
-                                  fontSize: '9px', fontWeight: 800,
-                                  background: enrollment.stream === 'science' ? '#F0FFF4' : '#FFFBEB',
-                                  color: enrollment.stream === 'science' ? '#276749' : '#B7860A',
-                                  borderRadius: '8px', padding: '1px 5px'
-                                }}>
-                                  {enrollment.stream === 'science' ? 'SCI' : 'COM'}
-                                </span>
-                              )}
-                            </span>
-                          );
-                        })}
+                        {batchLabels.map((name, i) => (
+                          <span key={i} style={{
+                            display: 'inline-block',
+                            background: '#EFF6FF',
+                            color: '#1D4ED8',
+                            borderRadius: '999px',
+                            padding: '2px 12px',
+                            fontSize: '13px',
+                            fontWeight: 500,
+                            marginRight: '6px',
+                            marginBottom: '4px'
+                          }}>{name}</span>
+                        ))}
                       </div>
                     );
                   })()}
@@ -928,6 +945,33 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
           };
           const existing = safeLS('pba_batch_enrollments', []);
           saveLS('pba_batch_enrollments', [newRecord, ...existing]);
+
+          // Also sync to pba_batches
+          const allBatches = safeLS('pba_batches', []);
+          const updatedBatches = (allBatches || []).map(b => {
+            if (b.id !== enrollBatchId) return b;
+            const alreadyIn = (b.students || []).some(
+              s => (s.id || s.regNo) === student.id || (student.regNo && (s.id || s.regNo) === student.regNo)
+            );
+            if (alreadyIn) return b;
+            return {
+              ...b,
+              students: [
+                ...(b.students || []),
+                {
+                  id: student.id,
+                  regNo: student.regNo || '',
+                  name: student.name || '',
+                  mobilePhone: student.mobilePhone || student.phone || '',
+                  parentPhone: student.parentPhone || '',
+                  status: 'active',
+                  enrolledAt: new Date().toISOString()
+                }
+              ]
+            };
+          });
+          saveLS('pba_batches', updatedBatches);
+
           setShowSingleEnrollModal(false);
         };
 

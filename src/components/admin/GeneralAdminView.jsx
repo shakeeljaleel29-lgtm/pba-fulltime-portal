@@ -453,6 +453,48 @@ export const GeneralAdminView = ({ isMobile }) => {
     saveLS("pba_class_changes", classChanges);
   }, [classChanges]);
 
+  // ── One-time backfill: sync all existing batch enrollments to pba_students ──
+  useEffect(() => {
+    const allEnrollments = safeLS('pba_batch_enrollments', []);
+    if (!allEnrollments || allEnrollments.length === 0) return;
+
+    const existingProfiles = safeLS('pba_students', []);
+    const profileMap = {};
+    (existingProfiles || []).forEach(p => {
+      const pid = p.id || p.regNo;
+      if (pid) profileMap[pid] = p;
+    });
+
+    let changed = false;
+    (allEnrollments || []).forEach(enr => {
+      const sid = enr.studentId;
+      if (!sid || profileMap[sid]) return; // already synced
+
+      // Find student data from AppContext or existing pba_students
+      const st =
+        (data.students || []).find(s => s.id === sid) ||
+        (students      || []).find(s => s.id === sid);
+      if (!st) return;
+
+      profileMap[sid] = {
+        id:          sid,
+        regNo:       st.regNo       || '',
+        name:        st.name        || st.studentName || '',
+        mobilePhone: st.mobilePhone || st.phone       || '',
+        parentPhone: st.parentPhone || '',
+        status:      st.status      || 'active'
+      };
+      changed = true;
+    });
+
+    if (changed) {
+      const synced = Object.values(profileMap);
+      saveLS('pba_students', synced);
+      setStudents(synced);
+    }
+  }, []);
+  // ── End backfill ──
+
   // Tab 2: Classroom Manager State
   const [clsBranchFilter, setClsBranchFilter] = useState("All");
   const [clsTypeFilter, setClsTypeFilter] = useState("All");
@@ -3932,31 +3974,40 @@ export const GeneralAdminView = ({ isMobile }) => {
                   setBatchEnrollments(updated);
                   saveLS("pba_batch_enrollments", updated);
 
-                  // ── Sync student profiles to pba_students (profile only — no batchId) ──
-                  const existingProfiles = safeLS('pba_students', []);
-                  const updatedProfiles = [...(existingProfiles || [])];
+                  // ── Sync enrolled student profiles to pba_students ──
+                  const _existingProfiles = safeLS('pba_students', []);
+                  const _profileMap = {};
+                  (_existingProfiles || []).forEach(p => {
+                    const pid = p.id || p.regNo;
+                    if (pid) _profileMap[pid] = p;
+                  });
+
                   enrollSelectedStudentIds.forEach(stId => {
-                    const st = (data.students || []).find(s => s.id === stId);
+                    // Look in AppContext first, then in local students state
+                    const st =
+                      (data.students || []).find(s => s.id === stId) ||
+                      (students      || []).find(s => s.id === stId);
                     if (!st) return;
-                    const existingIdx = updatedProfiles.findIndex(
-                      s => s.id === stId || (st.regNo && s.regNo === st.regNo)
-                    );
                     const profile = {
-                      id: stId,
-                      regNo: st.regNo || '',
-                      name: st.name || '',
-                      mobilePhone: st.phone || st.mobilePhone || '',
+                      id:          stId,
+                      regNo:       st.regNo       || '',
+                      name:        st.name        || st.studentName || '',
+                      mobilePhone: st.mobilePhone || st.phone       || '',
                       parentPhone: st.parentPhone || '',
-                      status: st.status || 'active'
-                      // NOTE: no batchId — student can be in multiple batches
+                      status:      st.status      || 'active'
+                      // no batchId — student can be in multiple batches
                     };
-                    if (existingIdx >= 0) {
-                      updatedProfiles[existingIdx] = { ...updatedProfiles[existingIdx], ...profile };
+                    const existing = _profileMap[stId]
+                      || (st.regNo ? _profileMap[st.regNo] : null);
+                    if (existing) {
+                      const key = existing.id || existing.regNo;
+                      _profileMap[key] = { ...existing, ...profile };
                     } else {
-                      updatedProfiles.push(profile);
+                      _profileMap[stId] = profile;
                     }
                   });
-                  saveLS('pba_students', updatedProfiles);
+
+                  saveLS('pba_students', Object.values(_profileMap));
                   // ── End sync ──
 
                   setShowEnrollModal(false);
