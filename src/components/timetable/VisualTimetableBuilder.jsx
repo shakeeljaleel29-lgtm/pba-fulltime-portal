@@ -5,7 +5,9 @@ import {
   getStreams,
   getSessionTypes,
   getClassroomTypes,
-  getTimetableConfig
+  getTimetableConfig,
+  BATCH_COLORS,
+  getLecturerSubjects
 } from "../admin/GeneralAdminView";
 import {
   CalendarCheck,
@@ -376,6 +378,16 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
   // Year Plan state for Holiday Blackout
   const [yearPlanEvents, setYearPlanEvents] = useState(() => safeLS("pba_year_plan", []));
 
+  // Deterministic batch color map (sorted by batch name)
+  const allBatches = (batches && batches.length > 0 ? batches : (safeLS('pba_batches', []) || []))
+    .slice()
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  const batchColorMap = {};
+  allBatches.forEach((b, i) => {
+    batchColorMap[b.id] = BATCH_COLORS[i % BATCH_COLORS.length];
+  });
+
   // Print / Export Modal State
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [showPrintOverlay, setShowPrintOverlay] = useState(false);
@@ -649,6 +661,8 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
 
   const modalSelectedBatch = (batches || []).find((b) => b.id === sessionForm.batchId);
   const modalBatchSubjects = modalSelectedBatch?.subjects || modalSelectedBatch?.batchSubjects || [];
+  const selectedSubjectObj = (subjects || []).find((s) => s.id === sessionForm.subjectId);
+  const selectedSubjectName = selectedSubjectObj?.name || sessionForm.subject || sessionForm.subjectName || "";
 
   const batchFilteredLecturers = sessionForm.batchId
     ? (allLecturers || []).filter(l =>
@@ -657,18 +671,25 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
       )
     : (allLecturers || []);
 
-  const modalAvailableLecturers = batchFilteredLecturers.filter((l) =>
-    (l.subjects || []).includes(sessionForm.subjectId) ||
-    (l.subjectIds || []).includes(sessionForm.subjectId) ||
-    modalBatchSubjects.some((bs) =>
-      (bs.subjectId === sessionForm.subjectId || bs.id === sessionForm.subjectId) &&
-      (bs.lecturerId === l.id || bs.mainLecturerId === l.id)
-    )
-  );
+  const isLecturerQualified = (lec, subjectName, subjectId) => {
+    if (!subjectName && !subjectId) return true;
+    const qualSubjects = getLecturerSubjects(lec).map(s => s.toLowerCase());
+    if (subjectName && qualSubjects.includes(subjectName.toLowerCase())) return true;
+    if (subjectId && qualSubjects.includes(subjectId.toLowerCase())) return true;
+    if (subjectId && (lec.subjects || []).includes(subjectId)) return true;
+    if (subjectId && (lec.subjectIds || []).includes(subjectId)) return true;
+    if (modalBatchSubjects.some(bs => (bs.subjectId === subjectId || bs.id === subjectId) && (bs.lecturerId === lec.id || bs.mainLecturerId === lec.id))) return true;
+    return false;
+  };
 
-  const modalLecturerOptions = modalAvailableLecturers.length > 0
-    ? modalAvailableLecturers
-    : batchFilteredLecturers;
+  const qualifiedLecturers = batchFilteredLecturers.filter(lec => isLecturerQualified(lec, selectedSubjectName, sessionForm.subjectId));
+  const unqualifiedLecturers = batchFilteredLecturers.filter(lec => !isLecturerQualified(lec, selectedSubjectName, sessionForm.subjectId));
+
+  const selectedLecturer = (allLecturers || []).find(l => l.id === sessionForm.lecturerId);
+  const mismatchWarning = (() => {
+    if (!selectedLecturer || !selectedSubjectName) return false;
+    return !isLecturerQualified(selectedLecturer, selectedSubjectName, sessionForm.subjectId);
+  })();
 
   const getLecturerLabel = (lecturer, selectedDay) => {
     if (!lecturer) return "";
@@ -1053,6 +1074,40 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
         </div>
       )}
 
+      {/* COLOR LEGEND — shown above the timetable grid in All Batches mode */}
+      {activeBatchId === "all" && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: '8px',
+          marginBottom: '12px', padding: '10px 12px',
+          background: '#F9FAFB', border: '1px solid #E5E7EB',
+          borderRadius: '10px'
+        }}>
+          {allBatches.map(b => {
+            const col = batchColorMap[b.id] || BATCH_COLORS[0];
+            return (
+              <span key={b.id} style={{
+                display: 'inline-flex', alignItems: 'center', gap: '5px',
+                padding: '3px 10px',
+                background: col.bg,
+                border: `1px solid ${col.border}`,
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: col.text
+              }}>
+                <span style={{
+                  width: '8px', height: '8px',
+                  borderRadius: '50%',
+                  background: col.text,
+                  display: 'inline-block'
+                }} />
+                {b.name}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {/* WEEKLY GRID */}
       <div
         style={{
@@ -1076,6 +1131,16 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
             <div style={{ padding: "12px", fontSize: "11px", fontWeight: 700, color: "#718096", textAlign: "center" }}>TIME</div>
             {activeDays.map((day) => {
               const holiday = getHolidayForDay(day);
+              const daySessAll = filteredSessions.filter((s) => s.day === day);
+              const maxOverlap = Math.max(
+                ...timeSlots.slice(0, -1).map((slot, slotIdx) => {
+                  const nextSlot = timeSlots[slotIdx + 1];
+                  const overlapping = daySessAll.filter((s) => timesOverlap(s.startTime, s.endTime, slot, nextSlot));
+                  const distinctBatches = new Set(overlapping.map((s) => s.batchId));
+                  return distinctBatches.size;
+                }),
+                1
+              );
               return (
                 <div
                   key={day}
@@ -1106,6 +1171,20 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                     </div>
                   )}
                   {day}
+                  {activeBatchId === "all" && maxOverlap > 1 && (
+                    <span style={{
+                      marginLeft: '6px',
+                      fontSize: '9px',
+                      background: '#FEF3C7',
+                      color: '#92400E',
+                      borderRadius: '10px',
+                      padding: '1px 5px',
+                      fontWeight: 700,
+                      verticalAlign: 'middle'
+                    }}>
+                      {maxOverlap} batches
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -1205,35 +1284,168 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                     );
                   });
 
+                const isAllBatchesMode = activeBatchId === "all";
+
+                // Check lecturer mismatch
+                const sessionLecturer = (allLecturers || []).find((u) => u.id === sess.lecturerId);
+                const sessionMismatch = (() => {
+                  if (!sessionLecturer || (!sess.subjectId && !sess.subjectName)) return false;
+                  const subName = (rawSubName && rawSubName !== '(No Subject)') ? rawSubName : (sess.subjectName || '');
+                  if (!subName || subName === '(No Subject)') return false;
+                  const qualSubjects = getLecturerSubjects(sessionLecturer).map((s) => s.toLowerCase());
+                  const isQual = qualSubjects.some((s) => s === subName.toLowerCase() || s === (sess.subjectId || '').toLowerCase()) ||
+                                 (sessionLecturer.subjects || []).includes(sess.subjectId) ||
+                                 (sessionLecturer.subjectIds || []).includes(sess.subjectId);
+                  return !isQual;
+                })();
+
                 let widthStyle = `calc(${colWidthPct}% - 6px)`;
                 let leftStyle = `calc(80px + ${leftOffsetPct}% + 3px)`;
 
-                if (isSplitStream) {
-                  const sortedPair = [sess, sameSlotSess[0]].sort((a, b) => a.id.localeCompare(b.id));
-                  const isFirst = sortedPair[0].id === sess.id;
-                  widthStyle = `calc(${colWidthPct / 2}% - 4px)`;
-                  leftStyle = isFirst
-                    ? `calc(80px + ${leftOffsetPct}% + 2px)`
-                    : `calc(80px + ${leftOffsetPct + colWidthPct / 2}% + 2px)`;
+                if (isAllBatchesMode) {
+                  const overlappingSess = daySessions.filter((s) =>
+                    timesOverlap(s.startTime, s.endTime, sess.startTime, sess.endTime)
+                  );
+                  const distinctBatchIds = Array.from(new Set(overlappingSess.map((s) => s.batchId || 'unknown')))
+                    .sort((a, b) => {
+                      const nameA = (allBatches.find((bat) => bat.id === a)?.name || a);
+                      const nameB = (allBatches.find((bat) => bat.id === b)?.name || b);
+                      return nameA.localeCompare(nameB);
+                    });
+
+                  const subColsCount = distinctBatchIds.length;
+                  const batchSubColIdx = Math.max(0, distinctBatchIds.indexOf(sess.batchId || 'unknown'));
+                  const sameBatchOverlapping = overlappingSess.filter((s) => (s.batchId || 'unknown') === (sess.batchId || 'unknown'));
+                  const sameBatchIdx = Math.max(0, sameBatchOverlapping.findIndex((s) => s.id === sess.id));
+                  const totalSlotsInBatch = Math.max(1, sameBatchOverlapping.length);
+
+                  const subColWidthPct = colWidthPct / subColsCount;
+                  const slotWidthPct = subColWidthPct / totalSlotsInBatch;
+                  const totalOffsetPct = leftOffsetPct + batchSubColIdx * subColWidthPct + sameBatchIdx * slotWidthPct;
+
+                  widthStyle = `calc(${slotWidthPct}% - 4px)`;
+                  leftStyle = `calc(80px + ${totalOffsetPct}% + 2px)`;
+                } else {
+                  if (isSplitStream) {
+                    const sortedPair = [sess, sameSlotSess[0]].sort((a, b) => a.id.localeCompare(b.id));
+                    const isFirst = sortedPair[0].id === sess.id;
+                    widthStyle = `calc(${colWidthPct / 2}% - 4px)`;
+                    leftStyle = isFirst
+                      ? `calc(80px + ${leftOffsetPct}% + 2px)`
+                      : `calc(80px + ${leftOffsetPct + colWidthPct / 2}% + 2px)`;
+                  }
                 }
 
-                const isDimmed = activeBatchId !== "all" && sess.batchId !== activeBatchId;
+                const isDimmed = !isAllBatchesMode && sess.batchId !== activeBatchId;
+                const col = batchColorMap[sess.batchId] || BATCH_COLORS[0];
 
-                const subject   = subjects.find(s => s.id === sess.subjectId);
-                const batch     = batches.find(b => b.id === sess.batchId);
-                const lecturer  = allLecturers.find(u => u.id === sess.lecturerId);
-                const classroom = classrooms.find(c => c.id === sess.classroomId);
+                if (isAllBatchesMode) {
+                  return (
+                    <div
+                      key={sess.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenEditModal(sess);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: leftStyle,
+                        top: `${topPx + 2}px`,
+                        width: widthStyle,
+                        height: `${heightPx}px`,
+                        background: col.bg,
+                        border: `1px solid ${col.border}`,
+                        borderRadius: '6px',
+                        padding: '4px 6px',
+                        boxSizing: 'border-box',
+                        overflow: 'hidden',
+                        cursor: sess.isLocked ? 'default' : 'pointer',
+                        zIndex: 10,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '2px',
+                        minWidth: 0
+                      }}
+                    >
+                      {/* Batch name tag */}
+                      <div style={{
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        color: col.text,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        borderBottom: `1px solid ${col.border}`,
+                        paddingBottom: '2px',
+                        marginBottom: '2px'
+                      }}>
+                        {batch?.name || sess.batchName || sess.batchId}
+                      </div>
 
-                const rawSubName = subject?.name || (sess.subjectName !== "(No Subject)" ? sess.subjectName : null);
-                const hasNoSubject = !rawSubName || rawSubName === "(No Subject)";
-                const batchName = batch?.name || sess.batchName || "(No Batch)";
-                const cardTitle = !hasNoSubject
-                  ? rawSubName
-                  : (sess.subjectCode || subject?.code)
-                    ? `${sess.subjectCode || subject?.code}`
-                    : `[No Subject — ${batchName !== "(No Batch)" ? batchName : "Unknown Batch"}]`;
-                const lecturerName  = lecturer?.name  || '—';
-                const classroomName = classroom?.name || '—';
+                      {/* Subject */}
+                      <div style={{
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        color: col.text,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        {cardTitle}
+                      </div>
+
+                      {/* Teacher / Lecturer */}
+                      {lecturerName && lecturerName !== '—' && (
+                        <div style={{
+                          fontSize: '10px',
+                          color: col.text,
+                          opacity: 0.75,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}>
+                          {lecturerName}
+                        </div>
+                      )}
+
+                      {/* Room */}
+                      {classroomName && classroomName !== '—' && (
+                        <div style={{
+                          fontSize: '10px',
+                          color: col.text,
+                          opacity: 0.65,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}>
+                          📍 {classroomName}
+                        </div>
+                      )}
+
+                      {/* Mismatch badge */}
+                      {sessionMismatch && (
+                        <span
+                          title={`${sessionLecturer?.name} is not a ${rawSubName || cardTitle} lecturer`}
+                          style={{
+                            display: 'inline-block',
+                            fontSize: '9px',
+                            background: '#FEF3C7',
+                            color: '#92400E',
+                            border: '1px solid #FDE68A',
+                            borderRadius: '4px',
+                            padding: '1px 4px',
+                            marginTop: '2px',
+                            cursor: 'default',
+                            width: 'fit-content'
+                          }}
+                        >
+                          ⚠ Mismatch
+                        </span>
+                      )}
+                    </div>
+                  );
+                }
 
                 return (
                   <div
@@ -1313,6 +1525,27 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                     }}>
                       {hasNoSubject && '⚠ '}{cardTitle}
                     </div>
+
+                    {/* Mismatch badge */}
+                    {sessionMismatch && (
+                      <span
+                        title={`${sessionLecturer?.name} is not a ${rawSubName || cardTitle} lecturer`}
+                        style={{
+                          display: 'inline-block',
+                          fontSize: '10px',
+                          background: '#FEF3C7',
+                          color: '#92400E',
+                          border: '1px solid #FDE68A',
+                          borderRadius: '4px',
+                          padding: '1px 5px',
+                          marginTop: '3px',
+                          cursor: 'default',
+                          width: 'fit-content'
+                        }}
+                      >
+                        ⚠ Subject mismatch
+                      </span>
+                    )}
 
                     {/* Batch name */}
                     <div style={{
@@ -1497,18 +1730,54 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                       width: "100%",
                       padding: "8px 12px",
                       borderRadius: "8px",
-                      border: "1px solid #E3E6EA",
+                      border: `1px solid ${mismatchWarning ? '#FCA5A5' : '#E3E6EA'}`,
                       fontSize: "13px",
-                      opacity: !sessionForm.subjectId ? 0.5 : 1
+                      opacity: !sessionForm.subjectId ? 0.5 : 1,
+                      background: "#fff"
                     }}
                   >
                     <option value="">— Select Lecturer —</option>
-                    {(modalLecturerOptions || []).map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {getLecturerLabel(l, sessionForm.day)}
-                      </option>
-                    ))}
+                    {qualifiedLecturers.length > 0 && (
+                      <optgroup label="✓ Qualified for this subject">
+                        {qualifiedLecturers.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {getLecturerLabel(l, sessionForm.day)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {unqualifiedLecturers.length > 0 && (
+                      <optgroup label="⚠ Not listed for this subject">
+                        {unqualifiedLecturers.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.name} (not assigned to {selectedSubjectName || "this subject"})
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
+
+                  {mismatchWarning && (
+                    <div style={{
+                      marginTop: '6px',
+                      padding: '8px 12px',
+                      background: '#FEF3C7',
+                      border: '1px solid #FDE68A',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      color: '#92400E',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}>
+                      <span style={{ fontSize: '14px' }}>⚠️</span>
+                      <span>
+                        <strong>{selectedLecturer?.name}</strong> is not listed as a{' '}
+                        <strong>{selectedSubjectName}</strong> lecturer. You can still
+                        save, but this may be an error.
+                      </span>
+                    </div>
+                  )}
                   {sessionForm.lecturerId && (() => {
                     const lect = (allLecturers || []).find((l) => l.id === sessionForm.lecturerId);
                     if (!lect) return null;

@@ -1475,28 +1475,39 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                           return (
                             <td key={day} style={{ padding: '12px 14px', borderBottom: '1px solid #F4F5F7', verticalAlign: 'top', minWidth: '130px' }}>
                               {matchingSessions.length > 0 ? (
-                                matchingSessions.map((s, idx) => (
-                                  <div
-                                    key={idx}
-                                    style={{
-                                      background: '#EEF2FF',
-                                      border: '1px solid #C7D2FE',
-                                      borderRadius: '8px',
-                                      padding: '6px 8px',
-                                      marginBottom: '4px',
-                                      fontSize: '11px',
-                                      textAlign: 'left'
-                                    }}
-                                  >
-                                    <div style={{ fontWeight: 700, color: '#4F46E5' }}>{s.subjectName || s.subjectCode}</div>
-                                    <div style={{ color: '#6B7280', fontSize: '10px' }}>{s.batchName}</div>
-                                    {(s.startTime || s.endTime || s.time) && (
-                                      <div style={{ color: '#6B7280', fontSize: '10px', marginTop: '2px' }}>
-                                        {s.startTime && s.endTime ? `${s.startTime}–${s.endTime}` : s.time}
-                                      </div>
-                                    )}
-                                  </div>
-                                ))
+                                matchingSessions.map((s, idx) => {
+                                  const qualSubjects = getLecturerSubjects(lec).map(subj => (subj || '').toLowerCase());
+                                  const sessSubject = (s.subjectName || s.subject || '').trim().toLowerCase();
+                                  const sessionMismatch = Boolean(sessSubject && !qualSubjects.includes(sessSubject) && !qualSubjects.includes("unassigned"));
+                                  return (
+                                    <div
+                                      key={idx}
+                                      style={{
+                                        background: sessionMismatch ? '#FFFBEB' : '#EEF2FF',
+                                        border: '1px solid #C7D2FE',
+                                        borderLeft: sessionMismatch ? '3px solid #F59E0B' : '3px solid #6366F1',
+                                        borderRadius: '8px',
+                                        padding: '6px 8px',
+                                        marginBottom: '4px',
+                                        fontSize: '11px',
+                                        textAlign: 'left'
+                                      }}
+                                    >
+                                      <div style={{ fontWeight: 700, color: sessionMismatch ? '#92400E' : '#4F46E5' }}>{s.subjectName || s.subjectCode}</div>
+                                      <div style={{ color: '#6B7280', fontSize: '10px' }}>{s.batchName}</div>
+                                      {(s.startTime || s.endTime || s.time) && (
+                                        <div style={{ color: '#6B7280', fontSize: '10px', marginTop: '2px' }}>
+                                          {s.startTime && s.endTime ? `${s.startTime}–${s.endTime}` : s.time}
+                                        </div>
+                                      )}
+                                      {sessionMismatch && (
+                                        <div style={{ fontSize: '10px', color: '#92400E', marginTop: '2px', fontWeight: 600 }}>
+                                          ⚠ Not in lecturer's subjects
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })
                               ) : avail.length > 0 ? (
                                 <div style={{ color: '#9CA3AF', fontSize: '11px', fontStyle: 'italic', padding: '4px 0' }}>
                                   {avail.map((a, idx) => {
