@@ -49,16 +49,23 @@ const resolveBatchName = (batchRef) => {
 };
 
 export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose }) => {
-  const { data, linkStudentAccount, currentUser } = useApp();
+  const { data, linkStudentAccount, currentUser, updateStudent } = useApp();
   const [activeTab, setActiveTab] = useState(initialTab);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [adminNotes, setAdminNotes] = useState(student?.adminNotes || "");
+  const [profileRefresh, setProfileRefresh] = useState(0);
 
   useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
     }
   }, [initialTab]);
+
+  useEffect(() => {
+    setAdminNotes(student?.adminNotes || "");
+  }, [student?.id, student?.adminNotes]);
+
   const [showReportCardModal, setShowReportCardModal] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -71,6 +78,94 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
   const [enrollSelectedSubjects, setEnrollSelectedSubjects] = useState([]);
 
   if (!student) return null;
+
+  const handleSaveAdminNotes = () => {
+    if (updateStudent && student?.id) {
+      updateStudent(student.id, { adminNotes });
+    } else {
+      const list = safeLS('pba_students', []);
+      const updated = (list || []).map(s => (s.id === student?.id || s.regNo === student?.regNo) ? { ...s, adminNotes } : s);
+      saveLS('pba_students', updated);
+    }
+    if (student) {
+      student.adminNotes = adminNotes;
+    }
+  };
+
+  const handleUnenrollBatch = (batchNameOrId) => {
+    if (!window.confirm(`Are you sure you want to remove ${student?.name || 'this student'} from ${batchNameOrId}?`)) return;
+    try {
+      const allBatches = safeLS('pba_batches', []);
+      const updatedBatches = (allBatches || []).map(b => {
+        if (b.name === batchNameOrId || b.id === batchNameOrId) {
+          return {
+            ...b,
+            students: (b.students || []).filter(s =>
+              (s.id || s.regNo || '').toString() !== (student?.id || student?.regNo || '').toString()
+            )
+          };
+        }
+        return b;
+      });
+      saveLS('pba_batches', updatedBatches);
+
+      const allEnrollments = safeLS('pba_batch_enrollments', []);
+      const updatedEnrollments = (allEnrollments || []).filter(e =>
+        !((e.studentId === student?.id || e.regNo === student?.regNo) &&
+          (e.batchName === batchNameOrId || e.batchId === batchNameOrId))
+      );
+      saveLS('pba_batch_enrollments', updatedEnrollments);
+
+      if (student) {
+        if (Array.isArray(student.batches)) {
+          student.batches = student.batches.filter(b => b !== batchNameOrId);
+        }
+        if (student.batch === batchNameOrId) student.batch = '';
+        if (student.batchName === batchNameOrId) student.batchName = '';
+        if (student.batchId === batchNameOrId) student.batchId = '';
+      }
+      setProfileRefresh(prev => prev + 1);
+    } catch (err) {
+      console.error("Error unenrolling batch:", err);
+    }
+  };
+
+  const getInitials = (name) => {
+    if (!name || typeof name !== 'string') return 'ST';
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return 'ST';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
+  const formatEnrollDate = (dStr, format = 'short') => {
+    if (!dStr) return 'N/A';
+    const d = new Date(dStr);
+    if (isNaN(d.getTime())) return String(dStr);
+    const day = String(d.getDate()).padStart(2, '0');
+    const monthsShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthsLong = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    if (format === 'long') {
+      return `${day} ${monthsLong[d.getMonth()]} ${d.getFullYear()}`;
+    }
+    return `${day} ${monthsShort[d.getMonth()]} ${d.getFullYear()}`;
+  };
+
+  const getDobWithAge = (rawDob) => {
+    if (!rawDob) return null;
+    const dob = new Date(rawDob);
+    if (isNaN(dob.getTime())) return String(rawDob);
+    const today = new Date();
+    let age = today.getFullYear() - dob.getFullYear();
+    const m = today.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+      age--;
+    }
+    const day = String(dob.getDate()).padStart(2, '0');
+    const monthsLong = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const formatted = `${day} ${monthsLong[dob.getMonth()]} ${dob.getFullYear()}`;
+    return `${formatted} (Age: ${age})`;
+  };
 
   const studentFees = data.studentFees.filter((f) => f.studentId === student.id);
   const studentDiscipline = data.disciplineRecords.filter((d) => d.studentId === student.id);
@@ -247,126 +342,469 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
             })}
           </div>
           {/* OVERVIEW */}
-          {activeTab === "overview" && (
-            <div style={{ display: "grid", gridTemplateColumns: isMobileState ? "1fr" : "1fr 1fr", gap: "16px" }}>
-              <div className="card" style={{ marginBottom: 0 }}>
-                <h4 style={{ fontSize: "0.95rem", marginBottom: "12px", borderBottom: "1px solid #E2E8F0", paddingBottom: "6px" }}>
-                  Personal Information
-                </h4>
-                <div style={{ fontSize: "0.88rem", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <div>
-                    <strong style={{ color: "#64748B" }}>Branch:</strong> {student.branch}
+          {activeTab === "overview" && (() => {
+            const rawStatus = (student.status || 'Active').trim();
+            const statusLower = rawStatus.toLowerCase();
+            const heroStatusBg = statusLower === 'withdrawn' ? '#EF4444' : statusLower === 'completed' ? '#6B7280' : '#22C55E';
+            const heroStatusText = statusLower === 'withdrawn' ? 'Withdrawn' : statusLower === 'completed' ? 'Completed' : 'Active';
+
+            const acadPillBg = statusLower === 'withdrawn' ? '#FEE2E2' : statusLower === 'completed' ? '#F3F4F6' : '#D1FAE5';
+            const acadPillColor = statusLower === 'withdrawn' ? '#991B1B' : statusLower === 'completed' ? '#374151' : '#065F46';
+
+            // Batches calculation
+            const allBatches = safeLS('pba_batches', []);
+            const liveBatchCount = (allBatches || []).filter(b =>
+              (b.students || []).some(s =>
+                (s.id || s.regNo || s.studentId || '').toString() === (student.id || student.regNo || '').toString()
+              )
+            ).length;
+
+            const studentEnrollments = (safeLS('pba_batch_enrollments', []) || [])
+              .filter(e => (e.studentId === student.id || (student.regNo && e.regNo === student.regNo)) && e.status === 'active');
+
+            const candidateRefs = [
+              ...(student.batches || []),
+              ...(studentEnrollments.map(e => e.batchId)),
+              student.batchId,
+              student.batchName,
+              student.batch,
+              ...((allBatches || [])
+                .filter(b => (b.students || []).some(s => (s.id && s.id === student.id) || (student.regNo && (s.regNo === student.regNo || s.id === student.regNo))))
+                .map(b => b.name))
+            ];
+
+            const batchLabels = [];
+            candidateRefs.forEach(ref => {
+              const resolved = resolveBatchName(ref);
+              if (resolved && resolved !== 'Unknown Batch' && !batchLabels.includes(resolved)) {
+                batchLabels.push(resolved);
+              }
+            });
+
+            const totalBatchCount = Math.max(liveBatchCount, batchLabels.length);
+
+            // Personal Information fields
+            const dobDisplay = getDobWithAge(student.dateOfBirth || student.dob);
+            const enrolledDateFormatted = formatEnrollDate(student.enrollmentDate || student.enrolmentDate, 'long');
+
+            const personalFields = [
+              { icon: '📍', label: 'Branch', value: student.branch },
+              { icon: '🎂', label: 'Date of Birth', value: dobDisplay },
+              { icon: '📱', label: 'Student Phone', value: student.phone || student.studentPhone },
+              { icon: '📱', label: 'Parent Phone', value: student.parentPhone || student.guardianPhone },
+              { icon: '✉️', label: 'Email', value: student.email },
+              { icon: '📅', label: 'Enrolled', value: enrolledDateFormatted !== 'N/A' ? enrolledDateFormatted : null }
+            ].filter(f => f.value && String(f.value).trim() !== '');
+
+            const isNarrowDrawer = isMobileState || (typeof window !== 'undefined' && window.innerWidth < 640);
+
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {/* ── SECTION 1 — Student Hero Banner ── */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)',
+                  padding: '20px 24px',
+                  borderRadius: '12px',
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  marginBottom: '20px',
+                  flexWrap: isNarrowDrawer ? 'wrap' : 'nowrap'
+                }}>
+                  {/* Avatar circle */}
+                  <div style={{
+                    width: '56px',
+                    height: '56px',
+                    borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.2)',
+                    border: '2px solid rgba(255,255,255,0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '20px',
+                    fontWeight: 700,
+                    color: 'white',
+                    flexShrink: 0
+                  }}>
+                    {getInitials(student.name)}
                   </div>
-                  <div>
-                    <strong style={{ color: "#64748B" }}>Date of Birth:</strong> {student.dob}
+
+                  {/* Student details */}
+                  <div style={{ flex: 1, minWidth: '180px' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 700, color: 'white', marginBottom: '2px' }}>
+                      {student.name || 'Student Name'}
+                    </div>
+                    <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.75)', marginBottom: '4px' }}>
+                      {student.regNo || student.id || 'No Reg No'}
+                    </div>
+                    <div style={{
+                      background: 'rgba(255,255,255,0.15)',
+                      border: '1px solid rgba(255,255,255,0.25)',
+                      borderRadius: '20px',
+                      padding: '3px 10px',
+                      fontSize: '12px',
+                      color: 'white',
+                      display: 'inline-block'
+                    }}>
+                      {batchLabels[0] || 'No batch assigned'} · {student.branch || 'Main Branch'}
+                    </div>
                   </div>
-                  <div>
-                    <strong style={{ color: "#64748B" }}>Mobile Number:</strong> {student.phone}
-                  </div>
-                  <div>
-                    <strong style={{ color: "#64748B" }}>Parent/Guardian Phone:</strong> {student.parentPhone}
-                  </div>
-                  <div>
-                    <strong style={{ color: "#64748B" }}>Email:</strong> {student.email}
-                  </div>
-                  <div>
-                    <strong style={{ color: "#64748B" }}>Enrolment Date:</strong> {student.enrolmentDate}
+
+                  {/* Status badge */}
+                  <div style={{
+                    marginLeft: isNarrowDrawer ? '0' : 'auto',
+                    alignSelf: isNarrowDrawer ? 'flex-start' : 'center',
+                    background: heroStatusBg,
+                    color: 'white',
+                    borderRadius: '20px',
+                    padding: '4px 14px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px'
+                  }}>
+                    <span style={{ fontSize: '8px' }}>●</span> {heroStatusText}
                   </div>
                 </div>
-              </div>
 
-              <div className="card" style={{ marginBottom: 0 }}>
-                <h4 style={{ fontSize: "0.95rem", marginBottom: "12px", borderBottom: "1px solid #E2E8F0", paddingBottom: "6px" }}>
-                  Academic Status & Notes
-                </h4>
-                <div style={{ marginBottom: "12px" }}>
-                  <span className="badge badge-success" style={{ fontSize: "0.85rem" }}>
-                    Status: {student.status}
-                  </span>
-                </div>
-                <div style={{ fontSize: "0.85rem", color: "#475569" }}>
-                  <strong>Admin Notes:</strong>
-                  <p style={{ marginTop: "4px", fontStyle: "italic", background: "#F8FAFC", padding: "10px", borderRadius: "6px" }}>
-                    {student.adminNotes || "No notes logged for this student."}
-                  </p>
-                </div>
-
-                {/* Batches section */}
-                <div style={{ marginTop: '16px', borderTop: '1px solid #E2E8F0', paddingTop: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <strong style={{ fontSize: '0.9rem', color: '#1A202C' }}>Enrolled Batches</strong>
-                    <button
-                      onClick={() => {
-                        setEnrollBatchId("");
-                        setEnrollStream("");
-                        setEnrollSelectedSubjects([]);
-                        setShowSingleEnrollModal(true);
-                      }}
-                      style={{
-                        padding: '4px 10px',
-                        background: '#2B6CB0',
-                        color: '#FFFFFF',
-                        border: 'none',
-                        borderRadius: '6px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      ＋ Enroll in Batch
-                    </button>
+                {/* ── SECTION 2 — Quick Stats Row (4 tiles) ── */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: isNarrowDrawer ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+                  gap: '12px',
+                  marginBottom: '20px'
+                }}>
+                  {/* Tile 1: Enrolled */}
+                  <div style={{
+                    background: '#F9FAFB',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    padding: '14px 16px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '18px', marginBottom: '4px' }}>📅</div>
+                    <div style={{
+                      fontSize: '11px', color: '#6B7280', fontWeight: 500, marginBottom: '2px',
+                      textTransform: 'uppercase', letterSpacing: '0.5px'
+                    }}>Enrolled</div>
+                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827' }}>
+                      {formatEnrollDate(student.enrollmentDate || student.enrolmentDate, 'short')}
+                    </div>
                   </div>
 
-                  {(() => {
-                    const allBatches = safeLS('pba_batches', []);
-                    const studentEnrollments = safeLS('pba_batch_enrollments', [])
-                      .filter(e => (e.studentId === student.id || (student.regNo && e.regNo === student.regNo)) && e.status === 'active');
+                  {/* Tile 2: Batches */}
+                  <div style={{
+                    background: '#F9FAFB',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    padding: '14px 16px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '18px', marginBottom: '4px' }}>🎓</div>
+                    <div style={{
+                      fontSize: '11px', color: '#6B7280', fontWeight: 500, marginBottom: '2px',
+                      textTransform: 'uppercase', letterSpacing: '0.5px'
+                    }}>Batches</div>
+                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827' }}>
+                      {totalBatchCount}
+                    </div>
+                  </div>
 
-                    const candidateRefs = [
-                      ...(student.batches || []),
-                      ...(studentEnrollments.map(e => e.batchId)),
-                      student.batchId,
-                      student.batchName,
-                      student.batch,
-                      ...((allBatches || [])
-                        .filter(b => (b.students || []).some(s => (s.id && s.id === student.id) || (student.regNo && (s.regNo === student.regNo || s.id === student.regNo))))
-                        .map(b => b.name))
-                    ];
+                  {/* Tile 3: Documents */}
+                  <div style={{
+                    background: '#F9FAFB',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    padding: '14px 16px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '18px', marginBottom: '4px' }}>📄</div>
+                    <div style={{
+                      fontSize: '11px', color: '#6B7280', fontWeight: 500, marginBottom: '2px',
+                      textTransform: 'uppercase', letterSpacing: '0.5px'
+                    }}>Documents</div>
+                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827' }}>
+                      {studentDocs.length}
+                    </div>
+                  </div>
 
-                    const batchLabels = [];
-                    candidateRefs.forEach(ref => {
-                      const resolved = resolveBatchName(ref);
-                      if (resolved && resolved !== 'Unknown Batch' && !batchLabels.includes(resolved)) {
-                        batchLabels.push(resolved);
-                      }
-                    });
+                  {/* Tile 4: Discipline */}
+                  <div style={{
+                    background: '#F9FAFB',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    padding: '14px 16px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '18px', marginBottom: '4px' }}>⚠️</div>
+                    <div style={{
+                      fontSize: '11px', color: '#6B7280', fontWeight: 500, marginBottom: '2px',
+                      textTransform: 'uppercase', letterSpacing: '0.5px'
+                    }}>Discipline</div>
+                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827' }}>
+                      {studentDiscipline.length}
+                    </div>
+                  </div>
+                </div>
 
-                    if (batchLabels.length === 0) {
-                      return <span style={{ color: '#9CA3AF', fontSize: '13px' }}>No batch assigned</span>;
-                    }
+                {/* ── SECTION 3 — Personal Information card ── */}
+                <div style={{
+                  background: 'white',
+                  border: '1px solid #E5E7EB',
+                  borderRadius: '12px',
+                  padding: '20px 24px',
+                  marginBottom: '16px'
+                }}>
+                  <div style={{
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    color: '#374151',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                    marginBottom: '16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    paddingBottom: '10px',
+                    borderBottom: '1px solid #F3F4F6'
+                  }}>
+                    <span>👤</span>
+                    <span>Personal Information</span>
+                  </div>
 
-                    return (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {personalFields.map((field, idx) => (
+                      <div
+                        key={field.label}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '12px',
+                          padding: '8px 0',
+                          borderBottom: idx === personalFields.length - 1 ? 'none' : '1px solid #F9FAFB'
+                        }}
+                      >
+                        <span style={{
+                          fontSize: '14px',
+                          width: '20px',
+                          textAlign: 'center',
+                          color: '#6B7280',
+                          flexShrink: 0,
+                          marginTop: '1px'
+                        }}>
+                          {field.icon}
+                        </span>
+                        <span style={{
+                          width: '130px',
+                          flexShrink: 0,
+                          fontSize: '12px',
+                          color: '#6B7280',
+                          fontWeight: 500
+                        }}>
+                          {field.label}
+                        </span>
+                        <span style={{
+                          fontSize: '13px',
+                          color: '#111827',
+                          fontWeight: 500,
+                          wordBreak: 'break-word'
+                        }}>
+                          {field.value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── SECTION 4 — Academic Status + Enrolled Batches (side by side) ── */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: isNarrowDrawer ? '1fr' : '1fr 1fr',
+                  gap: '16px'
+                }}>
+                  {/* Academic Status Card */}
+                  <div style={{
+                    background: 'white',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '12px',
+                    padding: '20px 24px'
+                  }}>
+                    <div style={{
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      color: '#374151',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      marginBottom: '16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      paddingBottom: '10px',
+                      borderBottom: '1px solid #F3F4F6'
+                    }}>
+                      <span>🎓</span>
+                      <span>Academic Status</span>
+                    </div>
+
+                    {/* Status pill */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '6px 18px',
+                        borderRadius: '20px',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        background: acadPillBg,
+                        color: acadPillColor
+                      }}>
+                        ● {heroStatusText.toUpperCase()}
+                      </span>
+                    </div>
+
+                    {/* Admin Notes */}
+                    <div>
+                      <label style={{
+                        display: 'block',
+                        fontSize: '12px',
+                        color: '#6B7280',
+                        fontWeight: 500,
+                        marginBottom: '6px'
+                      }}>
+                        📝 Admin Notes
+                      </label>
+                      <textarea
+                        value={adminNotes}
+                        onChange={(e) => setAdminNotes(e.target.value)}
+                        onBlur={handleSaveAdminNotes}
+                        placeholder="Add confidential academic or administrative notes..."
+                        style={{
+                          width: '100%',
+                          minHeight: '80px',
+                          padding: '10px 12px',
+                          border: '1px solid #E5E7EB',
+                          borderRadius: '8px',
+                          fontSize: '13px',
+                          color: '#111827',
+                          resize: 'vertical',
+                          background: '#F9FAFB',
+                          boxSizing: 'border-box',
+                          fontFamily: 'inherit'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Enrolled Batches Card */}
+                  <div style={{
+                    background: 'white',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '12px',
+                    padding: '20px 24px'
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginBottom: '16px',
+                      paddingBottom: '10px',
+                      borderBottom: '1px solid #F3F4F6'
+                    }}>
+                      <div style={{
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        color: '#374151',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}>
+                        <span>📚</span>
+                        <span>Enrolled Batches</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEnrollBatchId("");
+                          setEnrollStream("");
+                          setEnrollSelectedSubjects([]);
+                          setShowSingleEnrollModal(true);
+                        }}
+                        style={{
+                          background: '#2563EB',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '5px 12px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        + Enroll in Batch
+                      </button>
+                    </div>
+
+                    {batchLabels.length === 0 ? (
+                      <div style={{
+                        fontSize: '13px',
+                        color: '#9CA3AF',
+                        textAlign: 'center',
+                        padding: '20px 0'
+                      }}>
+                        No batches enrolled yet
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                         {batchLabels.map((name, i) => (
-                          <span key={i} style={{
-                            display: 'inline-block',
-                            background: '#EFF6FF',
-                            color: '#1D4ED8',
-                            borderRadius: '999px',
-                            padding: '2px 12px',
-                            fontSize: '13px',
-                            fontWeight: 500,
-                            marginRight: '6px',
-                            marginBottom: '4px'
-                          }}>{name}</span>
+                          <span
+                            key={i}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              background: '#EFF6FF',
+                              color: '#1D4ED8',
+                              border: '1px solid #BFDBFE',
+                              borderRadius: '20px',
+                              padding: '4px 12px',
+                              fontSize: '12px',
+                              fontWeight: 500,
+                              margin: '4px 4px 4px 0'
+                            }}
+                          >
+                            <span>{name}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleUnenrollBatch(name)}
+                              title="Remove from batch"
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#93C5FD',
+                                cursor: 'pointer',
+                                padding: 0,
+                                fontSize: '14px',
+                                lineHeight: 1,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                marginLeft: '2px'
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.color = '#EF4444'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.color = '#93C5FD'; }}
+                            >
+                              ×
+                            </button>
+                          </span>
                         ))}
                       </div>
-                    );
-                  })()}
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ATTENDANCE */}
           {activeTab === "attendance" && (

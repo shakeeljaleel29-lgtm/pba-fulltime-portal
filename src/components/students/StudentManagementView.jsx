@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useApp } from "../../context/AppContext";
 import { DigitalAttendance } from "./DigitalAttendance";
 import { StudentProfileDrawer } from "./StudentProfileDrawer";
+export { StudentProfileDrawer } from "./StudentProfileDrawer";
 import { ParentSummaryView } from "./ParentSummaryView";
 import {
   GraduationCap,
