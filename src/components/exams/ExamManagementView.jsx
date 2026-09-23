@@ -107,13 +107,376 @@ export const ExamManagementView = ({ isMobile }) => {
   const [subjects, setSubjects] = useState(() => safeLS('pba_subjects', []));
   const [examSchedule, setExamSchedule] = useState(() => safeLS('pba_exam_schedule', []));
 
+  // Subject Clash Rules State
+  const [clashRulesOpen, setClashRulesOpen] = useState(false);
+  const [newClashA, setNewClashA] = useState('');
+  const [newClashB, setNewClashB] = useState('');
+  const [clashRules, setClashRules] = useState(() => safeLS('pba_clash_rules', []));
+
+  // Classrooms State
+  const [classrooms, setClassrooms] = useState(() => safeLS('pba_classrooms', []));
+
+  // Timetable Export State
+  const [exportFrom, setExportFrom] = useState('');
+  const [exportTo,   setExportTo]   = useState('');
+
   // Refresh on mount so newly created batches appear immediately
   useEffect(() => {
     setBatches(safeLS('pba_batches', []));
     setSubjects(safeLS('pba_subjects', []));
     setExamSchedule(safeLS('pba_exam_schedule', []));
     setLecturers(safeLS('pba_lecturers', []));
+    setClassrooms(safeLS('pba_classrooms', []));
+
+    // Seed clash rules defaults if not existing
+    const existingRules = safeLS('pba_clash_rules', null);
+    if (existingRules === null || existingRules === undefined) {
+      const defaults = [
+        { id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'uuid-1'), subjectA: 'Biology',        subjectB: 'Physics'         },
+        { id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'uuid-2'), subjectA: 'Biology',        subjectB: 'Chemistry'       },
+        { id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'uuid-3'), subjectA: 'Physics',        subjectB: 'Chemistry'       },
+        { id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'uuid-4'), subjectA: 'Biology',        subjectB: 'Maths'           },
+        { id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'uuid-5'), subjectA: 'Accounts',       subjectB: 'Business Studies'},
+        { id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'uuid-6'), subjectA: 'Accounts',       subjectB: 'Economics'       },
+        { id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'uuid-7'), subjectA: 'Business Studies', subjectB: 'Economics'     }
+      ];
+      saveLS('pba_clash_rules', defaults);
+      setClashRules(defaults);
+    } else {
+      setClashRules(existingRules);
+    }
+
+    // Bidirectional sync between pba_exams and pba_exam_schedule
+    const sched = safeLS('pba_exam_schedule', []);
+    const exams = safeLS('pba_exams', []);
+    if ((!exams || exams.length === 0) && sched && sched.length > 0) {
+      saveLS('pba_exams', sched);
+    } else if ((!sched || sched.length === 0) && exams && exams.length > 0) {
+      saveLS('pba_exam_schedule', exams);
+      setExamSchedule(exams);
+    }
   }, []);
+
+  const handleAddClashRule = () => {
+    if (!newClashA || !newClashB || newClashA === newClashB) return;
+    const existing = safeLS('pba_clash_rules', []);
+    const alreadyExists = (existing || []).some(r =>
+      (r.subjectA === newClashA && r.subjectB === newClashB) ||
+      (r.subjectA === newClashB && r.subjectB === newClashA)
+    );
+    if (alreadyExists) return;
+    const updated = [...(existing || []), {
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'clash_' + Date.now()),
+      subjectA: newClashA,
+      subjectB: newClashB
+    }];
+    saveLS('pba_clash_rules', updated);
+    setClashRules(updated);
+    setNewClashA('');
+    setNewClashB('');
+  };
+
+  const handleRemoveClashRule = (ruleId) => {
+    const updated = (safeLS('pba_clash_rules', []) || [])
+      .filter(r => r.id !== ruleId);
+    saveLS('pba_clash_rules', updated);
+    setClashRules(updated);
+  };
+
+  const subjectOptions = (() => {
+    const defaultList = ['Biology', 'Physics', 'Chemistry', 'Maths', 'Accounts', 'Business Studies', 'Economics'];
+    const lsList = (safeLS('pba_subjects', []) || []).map(s => s.name || s).filter(Boolean);
+    return [...new Set([...defaultList, ...lsList])].sort();
+  })();
+
+  const detectClashes = (subject, date, startTime, endTime, excludeExamId = null) => {
+    if (!subject || !date) return [];
+    const rules = safeLS('pba_clash_rules', []) || clashRules || [];
+    const allExams = (examSchedule && examSchedule.length > 0)
+      ? examSchedule
+      : (safeLS('pba_exam_schedule', []) || safeLS('pba_exams', []) || []);
+
+    const forbiddenPartners = (rules || [])
+      .filter(r => r.subjectA === subject || r.subjectB === subject)
+      .map(r => r.subjectA === subject ? r.subjectB : r.subjectA);
+
+    if (forbiddenPartners.length === 0) return [];
+
+    return (allExams || []).filter(exam => {
+      if (excludeExamId && exam.id === excludeExamId) return false;
+      if (exam.date !== date) return false;
+      const examSubj = exam.subject || exam.subjectName;
+      if (!forbiddenPartners.includes(examSubj)) return false;
+
+      const aStart = startTime || '00:00';
+      const aEnd   = endTime   || '23:59';
+      const bStart = exam.startTime || '00:00';
+      const bEnd   = exam.endTime   || '23:59';
+      return aStart < bEnd && aEnd > bStart;
+    });
+  };
+
+  const computeAllClashes = () => {
+    const allExams = (examSchedule && examSchedule.length > 0)
+      ? examSchedule
+      : (safeLS('pba_exam_schedule', []) || safeLS('pba_exams', []) || []);
+    const rules = safeLS('pba_clash_rules', []) || clashRules || [];
+    const clashedIds = new Set();
+
+    allExams.forEach((exam, i) => {
+      const examSubj = exam.subject || exam.subjectName;
+      if (!examSubj || !exam.date) return;
+      const partners = rules
+        .filter(r => r.subjectA === examSubj || r.subjectB === examSubj)
+        .map(r => r.subjectA === examSubj ? r.subjectB : r.subjectA);
+
+      if (partners.length === 0) return;
+
+      allExams.forEach((other, j) => {
+        if (i === j) return;
+        if (other.date !== exam.date) return;
+        const otherSubj = other.subject || other.subjectName;
+        if (!partners.includes(otherSubj)) return;
+        const aStart = exam.startTime  || '00:00';
+        const aEnd   = exam.endTime    || '23:59';
+        const bStart = other.startTime || '00:00';
+        const bEnd   = other.endTime   || '23:59';
+        if (aStart < bEnd && aEnd > bStart) {
+          clashedIds.add(exam.id);
+          clashedIds.add(other.id);
+        }
+      });
+    });
+    return clashedIds;
+  };
+
+  const clashedExamIds = computeAllClashes();
+
+  const handlePatchExam = (examId, patch) => {
+    const allSched = safeLS('pba_exam_schedule', []);
+    const updatedSched = (allSched || []).map(e =>
+      e.id === examId ? { ...e, ...patch } : e
+    );
+    saveLS('pba_exam_schedule', updatedSched);
+    setExamSchedule(updatedSched);
+
+    const allExams = safeLS('pba_exams', []);
+    const updatedExams = (allExams || []).map(e =>
+      e.id === examId ? { ...e, ...patch } : e
+    );
+    saveLS('pba_exams', updatedExams.length > 0 ? updatedExams : updatedSched);
+  };
+
+  const examStatus = (exam) => {
+    if (exam.invigilatorId && (exam.roomId || exam.venue))  return 'complete';
+    if (exam.invigilatorId || exam.roomId || exam.venue)  return 'partial';
+    return 'pending';
+  };
+
+  const handleExportPDF = () => {
+    const allExams = (safeLS('pba_exam_schedule', []) || []).length > 0
+      ? safeLS('pba_exam_schedule', [])
+      : (safeLS('pba_exams', []) || []);
+    const filtered = allExams
+      .filter(e => {
+        if (exportFrom && e.date < exportFrom) return false;
+        if (exportTo   && e.date > exportTo)   return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (a.date !== b.date) return (a.date || '').localeCompare(b.date || '');
+        return (a.startTime || '').localeCompare(b.startTime || '');
+      });
+
+    const byDate = {};
+    filtered.forEach(e => {
+      const d = e.date || 'TBD';
+      if (!byDate[d]) byDate[d] = [];
+      byDate[d].push(e);
+    });
+
+    const formatDate = (d) => {
+      if (!d || d === 'TBD') return 'Date TBD';
+      try {
+        return new Date(d).toLocaleDateString('en-GB', {
+          weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+        });
+      } catch {
+        return d;
+      }
+    };
+
+    const rows = Object.entries(byDate).map(([date, exams]) => `
+      <tr class="date-header">
+        <td colspan="5">${formatDate(date)}</td>
+      </tr>
+      ${exams.map(e => `
+        <tr>
+          <td>${e.startTime || '—'} – ${e.endTime || '—'}</td>
+          <td>${e.subject || e.subjectName || '—'}</td>
+          <td>${e.batchName || e.batch || '—'}</td>
+          <td>${e.invigilatorName || '<em style="color:#9CA3AF">TBC</em>'}</td>
+          <td>${e.roomName || e.venue || '<em style="color:#9CA3AF">TBC</em>'}</td>
+        </tr>
+      `).join('')}
+    `).join('');
+
+    const printHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>PBA Exam Timetable</title>
+        <style>
+          body { font-family: Arial, sans-serif; font-size: 12px;
+                 margin: 24px; color: #111827; }
+          h1   { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+          p.sub{ font-size: 12px; color: #6B7280; margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; }
+          th    { background: #1E3A8A; color: #fff; text-align: left;
+                  padding: 8px 10px; font-size: 11px; font-weight: 700;
+                  letter-spacing: 0.04em; }
+          td    { padding: 7px 10px; border-bottom: 1px solid #E5E7EB;
+                  vertical-align: top; }
+          tr.date-header td {
+            background: #EFF6FF; color: #1E40AF; font-weight: 700;
+            font-size: 13px; padding: 10px 10px 6px; border-top: 2px solid #BFDBFE;
+          }
+          tr:hover td { background: #F9FAFB; }
+          .tbc { color: #9CA3AF; font-style: italic; }
+          .footer { margin-top: 28px; font-size: 11px; color: #9CA3AF;
+                    border-top: 1px solid #E5E7EB; padding-top: 10px; }
+          @media print {
+            body { margin: 12mm; }
+            .footer { position: fixed; bottom: 12mm; width: 100%; }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>PBA Full-Time Portal — Examination Timetable</h1>
+        <p class="sub">Generated ${new Date().toLocaleDateString('en-GB', {
+          weekday:'long', day:'numeric', month:'long', year:'numeric'
+        })}${exportFrom || exportTo
+          ? ` &nbsp;·&nbsp; Period: ${exportFrom||'—'} to ${exportTo||'—'}`
+          : ''
+        }</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Subject</th>
+              <th>Batch</th>
+              <th>Invigilator</th>
+              <th>Room</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="footer">PBA Full-Time Portal &nbsp;·&nbsp; Confidential</div>
+      </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+    if (printWindow) {
+      printWindow.document.write(printHtml);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+      }, 400);
+    }
+  };
+
+  const handleCopyWhatsApp = () => {
+    const allExams = (safeLS('pba_exam_schedule', []) || []).length > 0
+      ? safeLS('pba_exam_schedule', [])
+      : (safeLS('pba_exams', []) || []);
+    const filtered = allExams
+      .filter(e => {
+        if (exportFrom && e.date < exportFrom) return false;
+        if (exportTo   && e.date > exportTo)   return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (a.date !== b.date) return (a.date || '').localeCompare(b.date || '');
+        return (a.startTime || '').localeCompare(b.startTime || '');
+      });
+
+    const formatDate = (d) => {
+      if (!d) return 'TBD';
+      try {
+        return new Date(d).toLocaleDateString('en-GB', {
+          weekday:'long', day:'numeric', month:'long', year:'numeric'
+        });
+      } catch {
+        return d;
+      }
+    };
+
+    let currentDate = '';
+    const lines = [
+      `📚 *PBA Full-Time Portal — Examination Timetable*`,
+      ``
+    ];
+
+    filtered.forEach(e => {
+      if (e.date !== currentDate) {
+        currentDate = e.date;
+        lines.push(`📅 *${formatDate(e.date)}*`);
+      }
+      const invig = e.invigilatorName || 'TBC';
+      const room  = e.roomName || e.venue || 'TBC';
+      lines.push(
+        `🕐 *${e.startTime||'?'}–${e.endTime||'?'}*` +
+        ` | ${e.subject || e.subjectName || '—'}` +
+        ` | ${e.batchName || e.batch || '—'}` +
+        ` | 👤 ${invig}` +
+        ` | 🏫 ${room}`
+      );
+    });
+
+    lines.push(``);
+    lines.push(`_Sent from PBA Full-Time Portal_`);
+
+    const msg = lines.join('\n');
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(msg)
+        .then(() => alert('Schedule copied! Paste into WhatsApp or email.'))
+        .catch(() => {
+          window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+        });
+    } else {
+      window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+    }
+  };
+
+  const computePercentage = (rawScore, paperTotal) => {
+    if (rawScore === null || rawScore === undefined || rawScore === '') return null;
+    const total = Number(paperTotal) || 100;
+    return Math.round((Number(rawScore) / total) * 100 * 10) / 10;
+  };
+
+  const computeOverallPercent = (studentMarks, examsInView) => {
+    let totalRaw   = 0;
+    let totalPaper = 0;
+    (examsInView || []).forEach(exam => {
+      const mark = studentMarks[exam.id];
+      if (mark !== null && mark !== undefined && mark !== '') {
+        totalRaw   += Number(mark);
+        totalPaper += (Number(exam.totalMarks) || 100);
+      }
+    });
+    if (totalPaper === 0) return null;
+    return Math.round((totalRaw / totalPaper) * 100 * 10) / 10;
+  };
+
+  const percentColor = (pct) => {
+    if (pct === null || pct === undefined) return { color: '#9CA3AF', bg: 'transparent' };
+    if (pct >= 75)  return { color: '#065F46', bg: '#D1FAE5' };
+    if (pct >= 50)  return { color: '#92400E', bg: '#FEF3C7' };
+    return           { color: '#991B1B', bg: '#FEE2E2' };
+  };
 
   // Exam results
   const [examResults, setExamResults] = useState(
@@ -540,6 +903,7 @@ export const ExamManagementView = ({ isMobile }) => {
           subjectId: row.subjectId,
           subjectCode: row.subjectCode || '',
           subjectName: row.subjectName || '',
+          subject: row.subjectName || '',
           paperNumber: paperNum,
           paperName: (paper.paperName || '').trim() || `Paper ${paperNum}`,
           date: paper.date,
@@ -548,6 +912,10 @@ export const ExamManagementView = ({ isMobile }) => {
           totalMarks: Number(paper.totalMarks) || 100,
           passMarks: Number(paper.passMarks) || 40,
           venue: paper.venue || '',
+          invigilatorId: existingRec?.invigilatorId || paper.invigilatorId || null,
+          invigilatorName: existingRec?.invigilatorName || paper.invigilatorName || null,
+          roomId: existingRec?.roomId || paper.roomId || null,
+          roomName: existingRec?.roomName || paper.roomName || null,
           invigilators: existingRec?.invigilators || paper.invigilators || [],
           notes: paper.notes || '',
           status: 'Pending',
@@ -573,6 +941,7 @@ export const ExamManagementView = ({ isMobile }) => {
     }
 
     saveLS('pba_exam_schedule', updated);
+    saveLS('pba_exams', updated);
     setExamSchedule(updated);
 
     // Sync to Calendar (pba_calendar_events)
@@ -1143,6 +1512,169 @@ export const ExamManagementView = ({ isMobile }) => {
       {/* SECTION 2 — EXAM SCHEDULE TAB */}
       {activeTab === "schedule" && (
         <div>
+          {/* CLASH RULES CONFIGURATION PANEL */}
+          <div style={{
+            border: '1px solid #FDE68A',
+            borderRadius: '10px',
+            marginBottom: '24px',
+            overflow: 'hidden'
+          }}>
+            {/* Header — always visible */}
+            <div
+              onClick={() => setClashRulesOpen(p => !p)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '14px 18px',
+                background: '#FFFBEB',
+                cursor: 'pointer',
+                userSelect: 'none'
+              }}
+            >
+              <div>
+                <span style={{ fontWeight: 700, fontSize: '14px', color: '#92400E' }}>
+                  ⚠️ Subject Clash Rules
+                </span>
+                <span style={{ marginLeft: '10px', fontSize: '12px', color: '#B45309' }}>
+                  {(safeLS('pba_clash_rules', []) || []).length} rule
+                  {(safeLS('pba_clash_rules', []) || []).length !== 1 ? 's' : ''} active
+                </span>
+              </div>
+              <span style={{ fontSize: '18px', color: '#B45309' }}>
+                {clashRulesOpen ? '▲' : '▼'}
+              </span>
+            </div>
+
+            {/* Body — shown when open */}
+            {clashRulesOpen && (
+              <div style={{ padding: '16px 18px', background: '#ffffff' }}>
+                <p style={{ fontSize: '13px', color: '#6B7280', marginTop: 0, marginBottom: '14px' }}>
+                  Subjects paired here will never be scheduled at the same time.
+                  Science–Commerce pairings are intentionally absent (they can overlap).
+                </p>
+
+                {/* Existing rules */}
+                <div style={{ marginBottom: '14px' }}>
+                  {(safeLS('pba_clash_rules', []) || []).map(rule => (
+                    <div key={rule.id} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '8px 12px',
+                      border: '1px solid #FEE2E2',
+                      borderRadius: '8px',
+                      marginBottom: '6px',
+                      background: '#FFF5F5'
+                    }}>
+                      <span style={{ fontSize: '13px', color: '#374151' }}>
+                        <span style={{ color: '#EF4444', marginRight: '6px' }}>🔴</span>
+                        <strong>{rule.subjectA}</strong>
+                        <span style={{ margin: '0 8px', color: '#9CA3AF' }}>cannot clash with</span>
+                        <strong>{rule.subjectB}</strong>
+                      </span>
+                      <button
+                        onClick={() => handleRemoveClashRule(rule.id)}
+                        style={{
+                          padding: '4px 10px', fontSize: '12px', fontWeight: 600,
+                          border: '1px solid #FCA5A5', borderRadius: '6px',
+                          background: '#FEF2F2', color: '#DC2626', cursor: 'pointer'
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  {(safeLS('pba_clash_rules', []) || []).length === 0 && (
+                    <p style={{ color: '#9CA3AF', fontSize: '13px', textAlign: 'center',
+                                padding: '12px 0' }}>
+                      No clash rules defined. All subjects can be scheduled simultaneously.
+                    </p>
+                  )}
+                </div>
+
+                {/* Add new rule */}
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center',
+                              flexWrap: 'wrap' }}>
+                  <select
+                    value={newClashA}
+                    onChange={e => setNewClashA(e.target.value)}
+                    style={{ padding: '8px 10px', border: '1px solid #D1D5DB',
+                             borderRadius: '8px', fontSize: '13px', minWidth: '160px' }}
+                  >
+                    <option value="">Subject A</option>
+                    {subjectOptions.map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: '13px', color: '#6B7280', fontWeight: 600 }}>
+                    cannot clash with
+                  </span>
+                  <select
+                    value={newClashB}
+                    onChange={e => setNewClashB(e.target.value)}
+                    style={{ padding: '8px 10px', border: '1px solid #D1D5DB',
+                             borderRadius: '8px', fontSize: '13px', minWidth: '160px' }}
+                  >
+                    <option value="">Subject B</option>
+                    {subjectOptions.filter(s => s !== newClashA).map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleAddClashRule}
+                    disabled={!newClashA || !newClashB || newClashA === newClashB}
+                    style={{
+                      padding: '8px 18px', fontSize: '13px', fontWeight: 700,
+                      border: 'none', borderRadius: '8px', cursor: 'pointer',
+                      background: (!newClashA || !newClashB || newClashA === newClashB)
+                        ? '#D1D5DB' : '#2563EB',
+                      color: '#ffffff'
+                    }}
+                  >
+                    + Add Rule
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* EXPORT CONTROLS TOOLBAR */}
+          <div style={{ display:'flex', alignItems:'center', gap:'12px',
+                        justifyContent:'flex-end', marginBottom:'16px',
+                        flexWrap:'wrap' }}>
+
+            {/* Optional: filter by date range */}
+            <div style={{ display:'flex', alignItems:'center', gap:'8px',
+                          fontSize:'13px', color:'#374151' }}>
+              <span>From</span>
+              <input type="date" value={exportFrom}
+                     onChange={e => setExportFrom(e.target.value)}
+                     style={{ padding:'6px 10px', border:'1px solid #D1D5DB',
+                              borderRadius:'6px', fontSize:'13px' }} />
+              <span>to</span>
+              <input type="date" value={exportTo}
+                     onChange={e => setExportTo(e.target.value)}
+                     style={{ padding:'6px 10px', border:'1px solid #D1D5DB',
+                              borderRadius:'6px', fontSize:'13px' }} />
+            </div>
+
+            {/* Copy for WhatsApp */}
+            <button onClick={handleCopyWhatsApp}
+              style={{ padding:'9px 18px', border:'1px solid #D1D5DB',
+                       borderRadius:'8px', background:'#fff',
+                       fontSize:'13px', fontWeight:600, color:'#374151',
+                       cursor:'pointer' }}>
+              📋 Copy Schedule
+            </button>
+
+            {/* Export PDF */}
+            <button onClick={handleExportPDF}
+              style={{ padding:'9px 20px', border:'none', borderRadius:'8px',
+                       background:'#2563EB', color:'#fff',
+                       fontSize:'13px', fontWeight:700, cursor:'pointer' }}>
+              📄 Export PDF
+            </button>
+          </div>
+
+          <div id="exam-timetable-print" style={{ display: 'none' }} />
+
           {/* FILTER ROW */}
           <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
             <select
@@ -1329,14 +1861,39 @@ export const ExamManagementView = ({ isMobile }) => {
                             position: 'relative'
                           }}>
                             <div style={{ display: 'flex', alignItems: 'center',
-                              justifyContent: 'space-between', marginBottom: '4px', paddingRight: '55px' }}>
+                              justifyContent: 'space-between', marginBottom: '6px', paddingRight: '55px', flexWrap: 'wrap', gap: '4px' }}>
                               <span style={{ fontSize: '12px', fontWeight: 700, color: '#1A202C' }}>
                                 {paper.paperName || `Paper ${paper.paperNumber || 1}`}
                               </span>
-                              {paper.status === 'Completed'
-                                ? <span style={{ fontSize: '10px', color: '#059669', fontWeight: 700 }}>✓ Done</span>
-                                : <span style={{ fontSize: '10px', color: '#D97706', fontWeight: 700 }}>⏳ Pending</span>
-                              }
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                {examStatus(paper) === 'complete' && (
+                                  <span style={{ background:'#D1FAE5', color:'#065F46',
+                                                 borderRadius:'999px', padding:'2px 8px',
+                                                 fontSize:'11px', fontWeight:600 }}>✓ Ready</span>
+                                )}
+                                {examStatus(paper) === 'partial' && (
+                                  <span style={{ background:'#FEF3C7', color:'#92400E',
+                                                 borderRadius:'999px', padding:'2px 8px',
+                                                 fontSize:'11px', fontWeight:600 }}>⏳ Partial</span>
+                                )}
+                                {examStatus(paper) === 'pending' && (
+                                  <span style={{ background:'#F3F4F6', color:'#6B7280',
+                                                 borderRadius:'999px', padding:'2px 8px',
+                                                 fontSize:'11px', fontWeight:600 }}>— Pending</span>
+                                )}
+                                {clashedExamIds.has(paper.id) && (
+                                  <span style={{
+                                    background: '#FEF3C7', color: '#92400E',
+                                    border: '1px solid #F59E0B',
+                                    borderRadius: '999px',
+                                    padding: '2px 8px',
+                                    fontSize: '11px',
+                                    fontWeight: 700
+                                  }}>
+                                    ⚠️ Clash
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             {/* Edit + Delete icons — top-right corner of paper card */}
@@ -1387,68 +1944,77 @@ export const ExamManagementView = ({ isMobile }) => {
                             <div style={{ fontSize: '11px', color: '#6B7280' }}>
                               🕐 {paper.startTime}–{paper.endTime}
                             </div>
+                            <div style={{ fontSize: '11px', color: '#6B7280' }}>
+                              🎯 Total Marks: <strong>{paper.totalMarks || 100}</strong> (Pass: {paper.passMarks || 40})
+                            </div>
                             {paper.venue ? (
                               <div style={{ fontSize: '11px', color: '#6B7280' }}>
                                 📍 {paper.venue}
                               </div>
                             ) : null}
 
-                            {/* Invigilator row */}
+                            {/* Inline Invigilator & Room Assignment */}
                             <div style={{
                               marginTop: '8px',
                               paddingTop: '8px',
-                              borderTop: '1px dashed #E5E7EB'
+                              borderTop: '1px dashed #E5E7EB',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px'
                             }}>
-                              {/* Show assigned invigilators */}
-                              {(paper.invigilators || []).length > 0 ? (
-                                <div>
-                                  <div style={{
-                                    fontSize: '10px', fontWeight: 700, color: '#6B7280',
-                                    textTransform: 'uppercase', letterSpacing: '0.05em',
-                                    marginBottom: '4px'
-                                  }}>
-                                    Invigilators
-                                  </div>
-                                  {(paper.invigilators || []).map((inv, i) => (
-                                    <div key={i} style={{
-                                      fontSize: '11px', color: '#374151',
-                                      display: 'flex', alignItems: 'center', gap: '4px',
-                                      marginBottom: '2px'
-                                    }}>
-                                      <span style={{
-                                        fontSize: '9px', fontWeight: 800,
-                                        color: inv.role === 'Chief' ? '#4F46E5' : '#6B7280',
-                                        background: inv.role === 'Chief' ? '#EEF2FF' : '#F3F4F6',
-                                        padding: '1px 5px', borderRadius: '4px',
-                                        textTransform: 'uppercase', flexShrink: 0
-                                      }}>
-                                        {inv.role === 'Chief' ? '★ Chief' : 'Asst'}
-                                      </span>
-                                      <span>{inv.lecturerName}</span>
-                                    </div>
-                                  ))}
-                                  <button
-                                    onClick={() => openInvigilatorModal(paper)}
-                                    style={{
-                                      marginTop: '5px', fontSize: '10px', color: '#4F46E5',
-                                      background: 'none', border: 'none', cursor: 'pointer',
-                                      padding: 0, fontWeight: 600, textDecoration: 'underline'
-                                    }}>
-                                    Edit Invigilators
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => openInvigilatorModal(paper)}
-                                  style={{
-                                    width: '100%', padding: '5px 8px',
-                                    border: '1px dashed #C7D2FE', borderRadius: '6px',
-                                    background: '#F5F3FF', color: '#4F46E5',
-                                    fontSize: '11px', fontWeight: 700, cursor: 'pointer'
-                                  }}>
-                                  👤 Assign Invigilators
-                                </button>
-                              )}
+                              <select
+                                value={paper.invigilatorId || ''}
+                                onChange={e => handlePatchExam(paper.id, {
+                                  invigilatorId:   e.target.value,
+                                  invigilatorName: (safeLS('pba_lecturers', []) || lecturers || [])
+                                                     .find(l => l.id === e.target.value)?.name || ''
+                                })}
+                                style={{
+                                  padding: '6px 8px',
+                                  border: '1px solid #D1D5DB',
+                                  borderRadius: '6px',
+                                  fontSize: '12px',
+                                  color: paper.invigilatorId ? '#111827' : '#9CA3AF',
+                                  background: '#fff',
+                                  width: '100%',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <option value="">— Invigilator —</option>
+                                {(safeLS('pba_lecturers', []) || lecturers || []).map(l => (
+                                  <option key={l.id} value={l.id}>{l.name}</option>
+                                ))}
+                              </select>
+
+                              <select
+                                value={paper.roomId || ''}
+                                onChange={e => {
+                                  const rm = (safeLS('pba_classrooms', []) || classrooms || [])
+                                              .find(r => r.id === e.target.value);
+                                  handlePatchExam(paper.id, {
+                                    roomId:   e.target.value,
+                                    roomName: rm?.name || '',
+                                    venue:    rm?.name || paper.venue || ''
+                                  });
+                                }}
+                                style={{
+                                  padding: '6px 8px',
+                                  border: '1px solid #D1D5DB',
+                                  borderRadius: '6px',
+                                  fontSize: '12px',
+                                  color: paper.roomId ? '#111827' : '#9CA3AF',
+                                  background: '#fff',
+                                  width: '100%',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <option value="">— Room —</option>
+                                {(safeLS('pba_classrooms', []) || classrooms || []).map(r => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.name}{r.capacity ? ` (${r.capacity})` : ''}
+                                  </option>
+                                ))}
+                              </select>
                             </div>
                           </div>
                         ))}
@@ -1758,10 +2324,10 @@ export const ExamManagementView = ({ isMobile }) => {
                       <th style={{ padding: '10px 14px', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', textAlign: 'left', width: '50px' }}>#</th>
                       <th style={{ padding: '10px 14px', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', textAlign: 'left' }}>STUDENT NAME</th>
                       <th style={{ padding: '10px 14px', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', textAlign: 'left' }}>STUDENT ID</th>
-                      <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', width: '160px' }}>
-                        MARKS OBTAINED
-                        <div style={{ fontSize: '9px', color: '#9CA3AF', fontWeight: 500, textTransform: 'none', marginTop: '2px' }}>
-                          out of {activePaperRec?.totalMarks || '—'}
+                      <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '11px', fontWeight: 800, color: '#4F46E5', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', width: '160px' }}>
+                        {(activePaperRec?.subjectCode || activePaperRec?.subjectName || 'MARKS')} /{activePaperRec?.totalMarks || 100}
+                        <div style={{ fontSize: '9px', color: '#6B7280', fontWeight: 500, textTransform: 'none', marginTop: '2px' }}>
+                          Max: {activePaperRec?.totalMarks || 100}
                         </div>
                       </th>
                       <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '10px', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '2px solid #E3E6EA', width: '80px' }}>%</th>
@@ -1789,32 +2355,46 @@ export const ExamManagementView = ({ isMobile }) => {
                               <td style={{ padding: '8px 14px', fontSize: '12px', color: '#6B7280' }}>{row.studentRegNo || '—'}</td>
                               {/* MARKS input */}
                               <td style={{ padding: '6px 14px', textAlign: 'center' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={activePaperRec?.totalMarks || 100}
-                                    step={0.5}
-                                    disabled={row.absent}
-                                    value={row.rawMarks !== null && row.rawMarks !== undefined ? row.rawMarks : ''}
-                                    placeholder="—"
-                                    onChange={e => {
-                                      const val = e.target.value === '' ? null : parseFloat(e.target.value);
-                                      saveMarkCell(
-                                        markExamSessionId, markSubjectId,
-                                        Number(markPaperNumber), row.studentId, 'rawMarks', val
-                                      );
-                                    }}
-                                    style={{ width: '72px', padding: '6px 8px', borderRadius: '6px', textAlign: 'center', border: '1px solid #E3E6EA', fontSize: '14px', fontWeight: 700, background: row.absent ? '#F9FAFB' : 'white', color: row.absent ? '#9CA3AF' : '#1A202C' }}
-                                  />
-                                  <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
-                                    /{activePaperRec?.totalMarks || '?'}
-                                  </span>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={activePaperRec?.totalMarks || 100}
+                                      step={0.5}
+                                      disabled={row.absent}
+                                      value={row.rawMarks !== null && row.rawMarks !== undefined ? row.rawMarks : ''}
+                                      placeholder="—"
+                                      onChange={e => {
+                                        const val = e.target.value === '' ? null : parseFloat(e.target.value);
+                                        saveMarkCell(
+                                          markExamSessionId, markSubjectId,
+                                          Number(markPaperNumber), row.studentId, 'rawMarks', val
+                                        );
+                                      }}
+                                      style={{
+                                        width: '72px', padding: '6px 8px', borderRadius: '6px', textAlign: 'center',
+                                        border: (row.rawMarks !== null && row.rawMarks > (activePaperRec?.totalMarks || 100))
+                                          ? '1.5px solid #EF4444' : '1px solid #E3E6EA',
+                                        fontSize: '14px', fontWeight: 700,
+                                        background: row.absent ? '#F9FAFB' : 'white',
+                                        color: row.absent ? '#9CA3AF' : '#1A202C'
+                                      }}
+                                    />
+                                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
+                                      /{activePaperRec?.totalMarks || 100}
+                                    </span>
+                                  </div>
+                                  {row.rawMarks !== null && row.rawMarks > (activePaperRec?.totalMarks || 100) && (
+                                    <span style={{ color: '#DC2626', fontSize: '11px', fontWeight: 600, marginTop: '2px' }}>
+                                      Max {activePaperRec?.totalMarks || 100}
+                                    </span>
+                                  )}
                                 </div>
                               </td>
                               {/* PERCENTAGE */}
-                              <td style={{ padding: '8px 14px', textAlign: 'center', fontSize: '13px', fontWeight: 700, color: row.absent ? '#9CA3AF' : row.percentage !== null ? (row.percentage >= (activePaperRec?.passMarks ? (activePaperRec.passMarks / (activePaperRec.totalMarks||100))*100 : 40) ? '#059669' : '#DC2626') : '#D1D5DB' }}>
-                                {row.absent ? 'ABS' : row.percentage !== null ? `${row.percentage}%` : '—'}
+                              <td style={{ padding: '8px 14px', textAlign: 'center', fontSize: '13px', fontWeight: 700, color: row.absent ? '#9CA3AF' : row.rawMarks !== null ? '#059669' : '#D1D5DB' }}>
+                                {row.absent ? 'ABS' : row.rawMarks !== null ? `${computePercentage(row.rawMarks, activePaperRec?.totalMarks || 100)}%` : '—'}
                               </td>
                               {/* ABSENT */}
                               <td style={{ padding: '8px 14px', textAlign: 'center' }}>
@@ -2298,14 +2878,16 @@ export const ExamManagementView = ({ isMobile }) => {
           subjectColumns.forEach(col => {
             const r = (resultsLookup[student.id] || {})[col.subjectId] || (resultsLookup[student.id] || {})[col.subjectName];
             const isAbs = r?.absent || r?.isAbsent;
-            const scoreVal = r?.score !== undefined ? r.score : (r?.marksObtained !== undefined ? r.marksObtained : r?.marks);
+            const scoreVal = r?.rawMarks !== undefined && r?.rawMarks !== null
+              ? r.rawMarks
+              : (r?.score !== undefined ? r.score : (r?.marksObtained !== undefined ? r.marksObtained : r?.marks));
             if (r && !isAbs && scoreVal !== null && scoreVal !== undefined && scoreVal !== '') {
               totalScore += Number(scoreVal);
             }
-            totalMax += Number(col.maxScore);
+            totalMax += Number(r?.totalMarks || col.maxScore || 100);
           });
-          const pct = totalMax > 0 ? Math.round((totalScore / totalMax) * 100) : 0;
-          return { student, totalScore, totalMax, pct };
+          const overallPercent = totalMax > 0 ? Math.round((totalScore / totalMax) * 100 * 10) / 10 : null;
+          return { student, totalScore, totalMax, overallPercent, pct: overallPercent !== null ? Math.round(overallPercent) : 0 };
         });
 
         const rankedTotals = [...studentTotals].sort((a, b) => b.totalScore - a.totalScore);
@@ -3216,6 +3798,82 @@ export const ExamManagementView = ({ isMobile }) => {
                               )}
                             </div>
 
+                            {/* Clash detection banner */}
+                            {(() => {
+                              const clashWarnings = detectClashes(
+                                row.subjectName || row.subjectCode,
+                                paper.date,
+                                paper.startTime,
+                                paper.endTime,
+                                paper.id || null
+                              );
+                              if (clashWarnings.length === 0) return null;
+                              return (
+                                <div style={{
+                                  background: '#FEF3C7',
+                                  border: '1px solid #F59E0B',
+                                  borderRadius: '8px',
+                                  padding: '12px 16px',
+                                  marginBottom: '12px'
+                                }}>
+                                  <div style={{ fontWeight: 700, fontSize: '13px', color: '#92400E',
+                                                marginBottom: '6px' }}>
+                                    ⚠️ Subject Clash Detected
+                                  </div>
+                                  {clashWarnings.map((clash, i) => (
+                                    <div key={i} style={{ fontSize: '13px', color: '#78350F', marginBottom: '2px' }}>
+                                      • <strong>{row.subjectName || row.subjectCode}</strong> clashes with{' '}
+                                      <strong>{clash.subject || clash.subjectName}</strong>
+                                      {clash.batchName ? ` (${clash.batchName})` : ''}{' '}
+                                      at {clash.startTime}–{clash.endTime}
+                                    </div>
+                                  ))}
+                                  <div style={{ fontSize: '12px', color: '#B45309', marginTop: '8px' }}>
+                                    Students taking both subjects will face simultaneous exams.
+                                    Adjust the date or time to resolve.
+                                  </div>
+                                </div>
+                              );
+                            })()}
+
+                            {/* Total Marks */}
+                            <div style={{ marginBottom: '16px' }}>
+                              <label style={{
+                                display: 'block', fontSize: '11px', fontWeight: 600,
+                                color: '#6B7280', letterSpacing: '0.05em', marginBottom: '6px'
+                              }}>
+                                TOTAL MARKS FOR THIS PAPER
+                              </label>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="1000"
+                                  value={paper.totalMarks ?? 100}
+                                  onChange={e => {
+                                    const updatedRows = (scheduleForm.subjectRows || []).map((r, ri) => {
+                                      if (ri !== rowIdx) return r;
+                                      return { ...r, papers: (r.papers || []).map((p, pi) =>
+                                        pi === pIdx ? { ...p, totalMarks: parseInt(e.target.value, 10) || 100 } : p) };
+                                    });
+                                    setScheduleForm(prev => ({ ...prev, subjectRows: updatedRows }));
+                                  }}
+                                  style={{
+                                    width: '100px',
+                                    padding: '8px 12px',
+                                    border: '1px solid #D1D5DB',
+                                    borderRadius: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: 600,
+                                    color: '#111827'
+                                  }}
+                                />
+                                <span style={{ fontSize: '13px', color: '#6B7280' }}>
+                                  marks  (default: 100 — change if this paper is out of 80, 60, etc.)
+                                </span>
+                              </div>
+                            </div>
+
                             {/* Paper fields: DATE | START | END | VENUE */}
                             <div style={{ display: 'grid',
                               gridTemplateColumns: '160px 100px 100px 1fr',
@@ -3536,6 +4194,43 @@ export const ExamManagementView = ({ isMobile }) => {
             <div style={{ padding: '22px', display: 'flex', flexDirection: 'column',
               gap: '14px' }}>
 
+              {/* Real-time Clash Detection Warning */}
+              {(() => {
+                const clashWarnings = detectClashes(
+                  editPaperRecord.subjectName || editPaperRecord.subject,
+                  editPaperForm.date,
+                  editPaperForm.startTime,
+                  editPaperForm.endTime,
+                  editPaperRecord.id
+                );
+                if (clashWarnings.length === 0) return null;
+                return (
+                  <div style={{
+                    background: '#FEF3C7',
+                    border: '1px solid #F59E0B',
+                    borderRadius: '8px',
+                    padding: '12px 16px'
+                  }}>
+                    <div style={{ fontWeight: 700, fontSize: '13px', color: '#92400E',
+                                  marginBottom: '6px' }}>
+                      ⚠️ Subject Clash Detected
+                    </div>
+                    {clashWarnings.map((clash, i) => (
+                      <div key={i} style={{ fontSize: '13px', color: '#78350F', marginBottom: '2px' }}>
+                        • <strong>{editPaperRecord.subjectName || editPaperRecord.subject}</strong> clashes with{' '}
+                        <strong>{clash.subject || clash.subjectName}</strong>
+                        {clash.batchName ? ` (${clash.batchName})` : ''}{' '}
+                        at {clash.startTime}–{clash.endTime}
+                      </div>
+                    ))}
+                    <div style={{ fontSize: '12px', color: '#B45309', marginTop: '8px' }}>
+                      Students taking both subjects will face simultaneous exams.
+                      Adjust the date or time to resolve.
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Paper Name */}
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
@@ -3658,6 +4353,7 @@ export const ExamManagementView = ({ isMobile }) => {
                       };
                     });
                     saveLS('pba_exam_schedule', updated);
+                    saveLS('pba_exams', updated);
                     setExamSchedule(updated);
 
                     // Sync updated session to Calendar
