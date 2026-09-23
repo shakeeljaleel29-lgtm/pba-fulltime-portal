@@ -52,6 +52,7 @@ export const ExamManagementView = ({ isMobile }) => {
   const [selectedExamId, setSelectedExamId] = useState("");
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
   const [selectedBatchName, setSelectedBatchName] = useState("");
+  const [selectedBatchId, setSelectedBatchId] = useState("");
 
   // Filters for Schedule Tab
   const [filterSubject, setFilterSubject] = useState("All");
@@ -492,6 +493,10 @@ export const ExamManagementView = ({ isMobile }) => {
   const [markPaperNumber, setMarkPaperNumber] = useState('');
 
   // Import modal state
+  const [importPreview, setImportPreview] = useState(null);
+  // null = no preview open
+  // { rows: [...], colNames: [...], nameCol: 0, scoreCol: 1, mappedRows: [...] }
+  const [lastImportSummary, setLastImportSummary] = useState(null);
   const [showMarkImport, setShowMarkImport] = useState(false);
   const [markImportRows, setMarkImportRows] = useState([]);
   const [markImportError, setMarkImportError] = useState('');
@@ -516,11 +521,19 @@ export const ExamManagementView = ({ isMobile }) => {
     return '#DC2626';
   };
 
-  // Build mark sheet rows: students from pba_students + saved results
+  // Build mark sheet rows: students from batch.students / pba_students + pba_marks / saved results
   const buildMarkSheet = (examSessionId, batchId, subjectId, paperNumber) => {
-    const students = (safeLS('pba_students', []) || [])
-      .filter(s => s.batchId === batchId)
-      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    const batches = safeLS('pba_batches', []) || [];
+    const batch = batches.find(b => b.id === batchId || (selectedBatchName && b.name === selectedBatchName));
+    const allStudents = safeLS('pba_students', []) || [];
+    const fromStudentDb = allStudents.filter(s => s.batchId === batchId || (batch && s.batch === batch.name));
+    const studentMap = new Map();
+    (batch?.students || []).forEach(s => { if (s) studentMap.set(s.id || s.regNo || s.name, s); });
+    fromStudentDb.forEach(s => { if (s) studentMap.set(s.id || s.regNo || s.name, s); });
+    const students = studentMap.size > 0
+      ? Array.from(studentMap.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      : fromStudentDb.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
     const paperRec = (examSchedule || []).find(r =>
       r.examSessionId === examSessionId &&
       r.subjectId === subjectId &&
@@ -528,29 +541,45 @@ export const ExamManagementView = ({ isMobile }) => {
     );
     const totalMks = paperRec?.totalMarks || 100;
     const passMks  = paperRec?.passMarks  || 40;
+    const currentExamId = paperRec?.id || selectedExamId;
+
+    const allMarksList = safeLS('pba_marks', []) || [];
+    const resultsList  = safeLS('pba_exam_results', []) || [];
+
     return (students || []).map(student => {
-      const saved = (safeLS('pba_exam_results', []) || []).find(r =>
-        r.examSessionId === examSessionId &&
-        r.subjectId === subjectId &&
-        Number(r.paperNumber) === Number(paperNumber) &&
+      // Look up mark in pba_marks first
+      const markRecord = (allMarksList || []).find(m =>
+        m.examId === currentExamId && m.studentId === student.id
+      );
+
+      const saved = (resultsList || []).find(r =>
+        ((r.examSessionId === examSessionId &&
+          r.subjectId === subjectId &&
+          Number(r.paperNumber) === Number(paperNumber)) ||
+         (r.examId && r.examId === currentExamId)) &&
         r.studentId === student.id
       );
-      const rawMarks = saved?.rawMarks ?? null;
+
+      const rawMarks = markRecord?.rawScore ?? saved?.rawMarks ?? null;
       const absent   = saved?.absent ?? false;
-      const pct = (!absent && rawMarks !== null && rawMarks !== '')
-        ? Math.round((parseFloat(rawMarks) / totalMks) * 1000) / 10
-        : null;
+      const pct = markRecord?.percentage ?? (
+        (!absent && rawMarks !== null && rawMarks !== '')
+          ? Math.round((parseFloat(rawMarks) / totalMks) * 1000) / 10
+          : null
+      );
+
       return {
         studentId:   student.id,
         studentName: student.name || '—',
-        studentRegNo: student.regNo || student.id || '',
+        studentRegNo: student.regNo || student.studentRegNo || student.id || '',
         rawMarks,
         percentage: pct,
         grade:      absent ? 'ABS' : calcGrade(pct),
         isPassed:   !absent && rawMarks !== null && parseFloat(rawMarks) >= passMks,
         absent,
         totalMarks: totalMks,
-        passMarks:  passMks
+        passMarks:  passMks,
+        isImported: markRecord !== undefined && markRecord !== null
       };
     });
   };
@@ -613,6 +642,184 @@ export const ExamManagementView = ({ isMobile }) => {
       : [...(existing || []), base];
     saveLS('pba_exam_results', updated);
     setExamResults(updated);
+  };
+
+  // CSV Import handlers for Lecturer Mark Sheets
+  const handleMarksCSVUpload = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result;
+      if (!text) return;
+      const lines = text.split('\n')
+        .map(l => l.trim())
+        .filter(Boolean);
+
+      if (lines.length < 2) {
+        alert('CSV appears empty or has only a header row.');
+        return;
+      }
+
+      // Detect delimiter: comma or tab
+      const delimiter = lines[0].includes('\t') ? '\t' : ',';
+      const headers   = lines[0].split(delimiter).map(h => h.trim());
+      const dataRows  = lines.slice(1).map(l =>
+        l.split(delimiter).map(c => c.trim().replace(/^"|"$/g, ''))
+      );
+
+      // Auto-detect columns: look for "name"/"reg" and "score"/"mark"
+      let nameColGuess  = headers.findIndex(h =>
+        /name|student|reg/i.test(h));
+      let scoreColGuess = headers.findIndex(h =>
+        /score|mark|result|total/i.test(h));
+      if (nameColGuess  < 0) nameColGuess  = 0;
+      if (scoreColGuess < 0) scoreColGuess = headers.length > 1 ? 1 : 0;
+
+      setImportPreview({
+        rows:      dataRows,
+        colNames:  headers,
+        nameCol:   nameColGuess,
+        scoreCol:  scoreColGuess,
+        mappedRows: []   // filled in step 3
+      });
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be re-uploaded
+    const inputEl = document.getElementById('marks-csv-input');
+    if (inputEl) inputEl.value = '';
+  };
+
+  const computeMapping = (preview) => {
+    if (!preview) return [];
+    const { rows, nameCol, scoreCol } = preview;
+
+    // Get enrolled students for the selected batch
+    const batches  = safeLS('pba_batches', []);
+    const examRec  = (safeLS('pba_exams', []) || []).find(e => e.id === selectedExamId) ||
+                     (examSchedule || []).find(r => r.id === selectedExamId);
+    const effectiveBatchId = selectedBatchId || examRec?.batchId || '';
+    const batch    = (batches || []).find(b => b.id === effectiveBatchId || (selectedBatchName && b.name === selectedBatchName));
+
+    const allStudents = safeLS('pba_students', []) || [];
+    const fromStudentDb = allStudents.filter(s => s.batchId === effectiveBatchId || (batch && s.batch === batch.name));
+    const studentMap = new Map();
+    (batch?.students || []).forEach(s => {
+      if (s) studentMap.set(s.id || s.regNo || s.name, s);
+    });
+    fromStudentDb.forEach(s => {
+      if (s) studentMap.set(s.id || s.regNo || s.name, s);
+    });
+    const enrolled = studentMap.size > 0 ? Array.from(studentMap.values()) : (batch?.students || []);
+
+    return rows.map(row => {
+      const rawIdentifier = (row[nameCol] || '').trim();
+      const rawScore      = parseFloat(row[scoreCol]);
+
+      // Try matching by reg no first, then by name (case-insensitive)
+      const matched = (enrolled || []).find(s =>
+        (s.regNo && s.regNo.toLowerCase().trim() === rawIdentifier.toLowerCase()) ||
+        (s.studentRegNo && s.studentRegNo.toLowerCase().trim() === rawIdentifier.toLowerCase()) ||
+        (s.name  && s.name.toLowerCase().trim()  === rawIdentifier.toLowerCase()) ||
+        (s.studentName && s.studentName.toLowerCase().trim() === rawIdentifier.toLowerCase())
+      );
+
+      return {
+        csvValue:    rawIdentifier,
+        rawScore:    isNaN(rawScore) ? null : rawScore,
+        student:     matched || null,
+        studentId:   matched?.id    || null,
+        studentName: matched?.name  || matched?.studentName || null,
+        studentRegNo: matched?.regNo || matched?.studentRegNo || '',
+        status: matched
+          ? (isNaN(rawScore) ? 'no-score' : 'matched')
+          : 'unmatched'
+      };
+    });
+  };
+
+  const handleConfirmImport = (mappedRows, paperTotal) => {
+    const existing = safeLS('pba_marks', []) || [];
+
+    // Remove any old marks for this examId (re-import replaces them)
+    const withoutOld = existing.filter(m => m.examId !== selectedExamId);
+
+    const nowIso = new Date().toISOString();
+    const newMarks = mappedRows
+      .filter(r => r.status === 'matched' && r.rawScore !== null)
+      .map(r => ({
+        id:           (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `mk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        examId:       selectedExamId,
+        studentId:    r.studentId,
+        studentRegNo: r.studentRegNo || r.student?.regNo || r.student?.studentRegNo || '',
+        rawScore:     r.rawScore,
+        paperTotal:   paperTotal,
+        percentage:   Math.round(r.rawScore / paperTotal * 1000) / 10,
+        importedAt:   nowIso
+      }));
+
+    const updatedMarks = [...withoutOld, ...newMarks];
+    saveLS('pba_marks', updatedMarks);
+    setAllMarks(updatedMarks);
+
+    // Sync pba_exam_results for legacy compatibility and Results & Rankings
+    const targetExam = (safeLS('pba_exams', []) || []).find(e => e.id === selectedExamId) ||
+                       (examSchedule || []).find(r => r.id === selectedExamId);
+    const existingResults = safeLS('pba_exam_results', []) || [];
+    let updatedResults = [...existingResults];
+
+    newMarks.forEach(nm => {
+      const matchedRow = mappedRows.find(r => r.studentId === nm.studentId);
+      const studentName = matchedRow?.studentName || '';
+      const pct = nm.percentage;
+      const passMks = targetExam?.passMarks || 40;
+      const resRecord = {
+        id: `result_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        examId:          selectedExamId,
+        examSessionId:   targetExam?.examSessionId || markExamSessionId || '',
+        examSessionName: targetExam?.examSessionName || '',
+        batchId:         targetExam?.batchId || selectedBatchId || '',
+        batchName:       targetExam?.batchName || '',
+        subjectId:       targetExam?.subjectId || markSubjectId || '',
+        subjectCode:     targetExam?.subjectCode || '',
+        subjectName:     targetExam?.subjectName || '',
+        paperNumber:     Number(targetExam?.paperNumber || markPaperNumber || 1),
+        paperName:       targetExam?.paperName || `Paper ${targetExam?.paperNumber || markPaperNumber || 1}`,
+        totalMarks:      paperTotal,
+        passMarks:       passMks,
+        studentId:       nm.studentId,
+        studentName:     studentName,
+        rawMarks:        nm.rawScore,
+        percentage:      pct,
+        grade:           calcGrade(pct),
+        isPassed:        nm.rawScore >= passMks,
+        absent:          false,
+        enteredAt:       nowIso,
+        updatedAt:       nowIso
+      };
+
+      const resIdx = updatedResults.findIndex(r =>
+        ((r.examSessionId && resRecord.examSessionId && r.examSessionId === resRecord.examSessionId &&
+          r.subjectId === resRecord.subjectId &&
+          Number(r.paperNumber) === Number(resRecord.paperNumber)) ||
+         (r.examId && r.examId === selectedExamId)) &&
+        r.studentId === resRecord.studentId
+      );
+
+      if (resIdx >= 0) {
+        updatedResults[resIdx] = { ...updatedResults[resIdx], ...resRecord };
+      } else {
+        updatedResults.push(resRecord);
+      }
+    });
+
+    saveLS('pba_exam_results', updatedResults);
+    setExamResults(updatedResults);
+
+    setLastImportSummary({
+      count: newMarks.length,
+      date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    });
+    setImportPreview(null);
   };
 
   const emptyPaper = () => ({
@@ -1150,8 +1357,8 @@ export const ExamManagementView = ({ isMobile }) => {
     }
   };
 
-  // Confirm Import preview rows into markEntryState
-  const handleConfirmImport = () => {
+  // Confirm Import preview rows into markEntryState (legacy)
+  const handleConfirmLegacyImport = () => {
     const newEntryState = { ...markEntryState };
     importRows.forEach((row) => {
       if (row.matchedStudent && row.isValidMark) {
@@ -2137,8 +2344,39 @@ export const ExamManagementView = ({ isMobile }) => {
               display: 'flex', gap: '12px', flexWrap: 'wrap',
               marginBottom: '18px', alignItems: 'flex-end'
             }}>
+              {/* Batch selector */}
+              <div style={{ flex: '1 1 200px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  display: 'block', marginBottom: '6px' }}>
+                  Batch
+                </label>
+                <select
+                  value={selectedBatchId}
+                  onChange={e => {
+                    const bId = e.target.value;
+                    setSelectedBatchId(bId);
+                    const bObj = (batches || []).find(b => b.id === bId);
+                    if (bObj) setSelectedBatchName(bObj.name);
+                    setMarkExamSessionId('');
+                    setMarkSubjectId('');
+                    setMarkPaperNumber('');
+                    setSelectedExamId('');
+                  }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
+                    border: '1px solid #E3E6EA', fontSize: '13px',
+                    background: 'white', color: '#1A202C' }}>
+                  <option value="">— All / Select Batch —</option>
+                  {(batches || safeLS('pba_batches', []) || []).map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.name || b.batchName || b.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Exam Session selector */}
-              <div style={{ flex: '1 1 260px' }}>
+              <div style={{ flex: '1 1 240px' }}>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
                   textTransform: 'uppercase', letterSpacing: '0.05em',
                   display: 'block', marginBottom: '6px' }}>
@@ -2147,15 +2385,24 @@ export const ExamManagementView = ({ isMobile }) => {
                 <select
                   value={markExamSessionId}
                   onChange={e => {
-                    setMarkExamSessionId(e.target.value);
+                    const sId = e.target.value;
+                    setMarkExamSessionId(sId);
                     setMarkSubjectId('');
                     setMarkPaperNumber('');
+                    setSelectedExamId('');
+                    const grp = (examSessionGroups || []).find(g => g.examSessionId === sId);
+                    if (grp?.batchId && !selectedBatchId) {
+                      setSelectedBatchId(grp.batchId);
+                      if (grp.batchName) setSelectedBatchName(grp.batchName);
+                    }
                   }}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
                     border: '1px solid #E3E6EA', fontSize: '13px',
                     background: 'white', color: '#1A202C' }}>
                   <option value="">— Select Session —</option>
-                  {(examSessionGroups || []).map(g => (
+                  {(examSessionGroups || [])
+                    .filter(g => !selectedBatchId || g.batchId === selectedBatchId)
+                    .map(g => (
                     <option key={g.examSessionId} value={g.examSessionId}>
                       {g.examSessionName}{g.batchName ? ` — ${g.batchName}` : ''}
                     </option>
@@ -2180,6 +2427,7 @@ export const ExamManagementView = ({ isMobile }) => {
                   onChange={e => {
                     setMarkSubjectId(e.target.value);
                     setMarkPaperNumber('');
+                    setSelectedExamId('');
                   }}
                   disabled={!markExamSessionId}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
@@ -2200,11 +2448,26 @@ export const ExamManagementView = ({ isMobile }) => {
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#374151',
                   textTransform: 'uppercase', letterSpacing: '0.05em',
                   display: 'block', marginBottom: '6px' }}>
-                  Paper
+                  Paper / Exam
                 </label>
                 <select
                   value={markPaperNumber}
-                  onChange={e => setMarkPaperNumber(e.target.value)}
+                  onChange={e => {
+                    const pNum = e.target.value;
+                    setMarkPaperNumber(pNum);
+                    const targetRec = (examSchedule || []).find(r =>
+                      r.examSessionId === markExamSessionId &&
+                      r.subjectId === markSubjectId &&
+                      Number(r.paperNumber) === Number(pNum)
+                    );
+                    if (targetRec) {
+                      setSelectedExamId(targetRec.id);
+                      if (targetRec.batchId) setSelectedBatchId(targetRec.batchId);
+                      if (targetRec.batchName) setSelectedBatchName(targetRec.batchName);
+                    } else {
+                      setSelectedExamId('');
+                    }
+                  }}
                   disabled={!markSubjectId}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px',
                     border: '1px solid #E3E6EA', fontSize: '13px',
@@ -2269,51 +2532,108 @@ export const ExamManagementView = ({ isMobile }) => {
             )}
 
             {/* Action buttons row (Import + Download Template) */}
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '16px',
-              flexWrap: 'wrap' }}>
-              <button
-                disabled={!markPaperNumber}
-                onClick={() => {
-                  if (!markPaperNumber) return;
-                  setMarkImportRows([]);
-                  setMarkImportError('');
-                  setShowMarkImport(true);
-                }}
-                style={{ padding: '8px 16px', borderRadius: '8px',
-                  border: `1px solid ${markPaperNumber ? '#4F46E5' : '#E3E6EA'}`,
-                  background: markPaperNumber ? '#EEF2FF' : '#F9FAFB',
-                  color: markPaperNumber ? '#4F46E5' : '#9CA3AF',
-                  fontSize: '13px', fontWeight: 700,
-                  cursor: markPaperNumber ? 'pointer' : 'not-allowed' }}>
-                ↑ Import from CSV / Excel
-              </button>
+            {selectedExamId && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px',
+                            marginBottom: '16px', flexWrap: 'wrap' }}>
 
-              <button
-                disabled={!markPaperNumber}
-                onClick={() => {
-                  if (!markPaperNumber || !activeSessionGroup?.batchId) return;
-                  const students = (safeLS('pba_students', []) || [])
-                    .filter(s => s.batchId === activeSessionGroup.batchId)
-                    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-                  const paperLabel = activePaperRec?.paperName || `Paper_${markPaperNumber}`;
-                  const header = 'Student Name,Student ID,Raw Marks,Absent';
-                  const rows   = (students || []).map(s => `${s.name || ''},${s.id || ''},,`);
-                  const csv    = [header, ...rows].join('\n');
-                  const blob   = new Blob([csv], { type: 'text/csv' });
-                  const url    = URL.createObjectURL(blob);
-                  const a      = document.createElement('a');
-                  a.href = url; a.download = `marks_template_${paperLabel}.csv`;
-                  a.click(); URL.revokeObjectURL(url);
-                }}
-                style={{ padding: '8px 16px', borderRadius: '8px',
-                  border: `1px solid ${markPaperNumber ? '#059669' : '#E3E6EA'}`,
-                  background: markPaperNumber ? '#ECFDF5' : '#F9FAFB',
-                  color: markPaperNumber ? '#059669' : '#9CA3AF',
-                  fontSize: '13px', fontWeight: 700,
-                  cursor: markPaperNumber ? 'pointer' : 'not-allowed' }}>
-                ↓ Download CSV Template
-              </button>
-            </div>
+                <button
+                  onClick={() => {
+                    const inputEl = document.getElementById('marks-csv-input');
+                    if (inputEl) inputEl.click();
+                  }}
+                  style={{
+                    padding: '9px 20px',
+                    border: '1px solid #2563EB',
+                    borderRadius: '8px',
+                    background: '#EFF6FF',
+                    color: '#1D4ED8',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  📥 Import Marks (CSV)
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (!activePaperRec || !activeSessionGroup?.batchId) return;
+                    const batches = safeLS('pba_batches', []) || [];
+                    const batch = batches.find(b => b.id === activeSessionGroup.batchId);
+                    const fromStudentDb = (safeLS('pba_students', []) || []).filter(s => s.batchId === activeSessionGroup.batchId || (batch && s.batch === batch.name));
+                    const sMap = new Map();
+                    (batch?.students || []).forEach(s => { if (s) sMap.set(s.id || s.regNo || s.name, s); });
+                    fromStudentDb.forEach(s => { if (s) sMap.set(s.id || s.regNo || s.name, s); });
+                    const students = Array.from(sMap.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                    const paperLabel = activePaperRec?.paperName || `Paper_${markPaperNumber}`;
+                    const header = 'Student Name,Reg No,Raw Marks';
+                    const rows   = (students || []).map(s => `"${s.name || ''}","${s.regNo || s.studentRegNo || ''}",`);
+                    const csv    = [header, ...rows].join('\n');
+                    const blob   = new Blob([csv], { type: 'text/csv' });
+                    const url    = URL.createObjectURL(blob);
+                    const a      = document.createElement('a');
+                    a.href = url; a.download = `marks_template_${paperLabel}.csv`;
+                    a.click(); URL.revokeObjectURL(url);
+                  }}
+                  style={{ padding: '8px 16px', borderRadius: '8px',
+                    border: '1px solid #059669',
+                    background: '#ECFDF5',
+                    color: '#059669',
+                    fontSize: '13px', fontWeight: 700,
+                    cursor: 'pointer' }}>
+                  ↓ Download CSV Template
+                </button>
+
+                <span style={{ fontSize: '12px', color: '#9CA3AF' }}>
+                  Upload the lecturer's mark sheet. Columns: student name or
+                  reg no, then raw score.
+                </span>
+
+                {/* Hidden file input */}
+                <input
+                  id="marks-csv-input"
+                  type="file"
+                  accept=".csv"
+                  style={{ display: 'none' }}
+                  onChange={e => handleMarksCSVUpload(e.target.files?.[0])}
+                />
+              </div>
+            )}
+
+            {/* Summary banner after import */}
+            {selectedExamId && (() => {
+              const currentExamMarks = (allMarks || safeLS('pba_marks', []) || []).filter(m => m.examId === selectedExamId);
+              if (lastImportSummary || currentExamMarks.length > 0) {
+                const count = lastImportSummary?.count || currentExamMarks.length;
+                const latestDate = lastImportSummary?.date || (currentExamMarks[0]?.importedAt
+                  ? new Date(currentExamMarks[0].importedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                  : new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
+                return (
+                  <div style={{
+                    padding: '10px 16px',
+                    background: '#ECFDF5',
+                    border: '1px solid #A7F3D0',
+                    borderRadius: '8px',
+                    color: '#065F46',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    marginBottom: '16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    <span style={{ fontSize: '15px' }}>✓</span>
+                    <span>
+                      Marks imported for {count} student{count !== 1 ? 's' : ''} on {latestDate}. Results and report cards are now available.
+                    </span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {/* STUDENT MARK TABLE */}
             <div style={{ background: '#FFFFFF', border: '1px solid #E3E6EA', borderRadius: '12px', overflow: 'hidden', marginBottom: '20px' }}>
@@ -2353,48 +2673,29 @@ export const ExamManagementView = ({ isMobile }) => {
                               <td style={{ padding: '8px 14px', fontSize: '13px', fontWeight: 700, color: '#1A202C' }}>{row.studentName}</td>
                               {/* ID / REG NO */}
                               <td style={{ padding: '8px 14px', fontSize: '12px', color: '#6B7280' }}>{row.studentRegNo || '—'}</td>
-                              {/* MARKS input */}
-                              <td style={{ padding: '6px 14px', textAlign: 'center' }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                                    <input
-                                      type="number"
-                                      min={0}
-                                      max={activePaperRec?.totalMarks || 100}
-                                      step={0.5}
-                                      disabled={row.absent}
-                                      value={row.rawMarks !== null && row.rawMarks !== undefined ? row.rawMarks : ''}
-                                      placeholder="—"
-                                      onChange={e => {
-                                        const val = e.target.value === '' ? null : parseFloat(e.target.value);
-                                        saveMarkCell(
-                                          markExamSessionId, markSubjectId,
-                                          Number(markPaperNumber), row.studentId, 'rawMarks', val
-                                        );
-                                      }}
-                                      style={{
-                                        width: '72px', padding: '6px 8px', borderRadius: '6px', textAlign: 'center',
-                                        border: (row.rawMarks !== null && row.rawMarks > (activePaperRec?.totalMarks || 100))
-                                          ? '1.5px solid #EF4444' : '1px solid #E3E6EA',
-                                        fontSize: '14px', fontWeight: 700,
-                                        background: row.absent ? '#F9FAFB' : 'white',
-                                        color: row.absent ? '#9CA3AF' : '#1A202C'
-                                      }}
-                                    />
-                                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
-                                      /{activePaperRec?.totalMarks || 100}
+                              {/* MARKS cell */}
+                              <td style={{ padding: '8px 14px', textAlign: 'center' }}>
+                                {row.rawMarks !== null && row.rawMarks !== undefined ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '14px', fontWeight: 700, color: '#111827' }}>
+                                      {row.rawMarks}
+                                      <span style={{ fontSize: '11px', color: '#9CA3AF', fontWeight: 400, marginLeft: '3px' }}>
+                                        /{activePaperRec?.totalMarks || row.totalMarks || 100}
+                                      </span>
                                     </span>
+                                    {row.percentage !== null && row.percentage !== undefined && (
+                                      <span style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px', fontWeight: 600 }}>
+                                        {row.percentage}%
+                                      </span>
+                                    )}
                                   </div>
-                                  {row.rawMarks !== null && row.rawMarks > (activePaperRec?.totalMarks || 100) && (
-                                    <span style={{ color: '#DC2626', fontSize: '11px', fontWeight: 600, marginTop: '2px' }}>
-                                      Max {activePaperRec?.totalMarks || 100}
-                                    </span>
-                                  )}
-                                </div>
+                                ) : (
+                                  <span style={{ color: '#9CA3AF', fontSize: '14px', fontWeight: 500 }}>—</span>
+                                )}
                               </td>
                               {/* PERCENTAGE */}
-                              <td style={{ padding: '8px 14px', textAlign: 'center', fontSize: '13px', fontWeight: 700, color: row.absent ? '#9CA3AF' : row.rawMarks !== null ? '#059669' : '#D1D5DB' }}>
-                                {row.absent ? 'ABS' : row.rawMarks !== null ? `${computePercentage(row.rawMarks, activePaperRec?.totalMarks || 100)}%` : '—'}
+                              <td style={{ padding: '8px 14px', textAlign: 'center', fontSize: '13px', fontWeight: 700, color: row.absent ? '#9CA3AF' : row.percentage !== null ? '#059669' : '#D1D5DB' }}>
+                                {row.absent ? 'ABS' : row.percentage !== null && row.percentage !== undefined ? `${row.percentage}%` : '—'}
                               </td>
                               {/* ABSENT */}
                               <td style={{ padding: '8px 14px', textAlign: 'center' }}>
@@ -2480,291 +2781,191 @@ export const ExamManagementView = ({ isMobile }) => {
               </div>
             )}
 
-            {/* BULK IMPORT MODAL */}
-            {showMarkImport && (
-              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-                zIndex: 3000, display: 'flex', alignItems: 'center',
-                justifyContent: 'center' }}>
-                <div style={{ background: 'white', borderRadius: '14px',
-                  width: '620px', maxHeight: '82vh', overflowY: 'auto',
-                  boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+            {/* IMPORT PREVIEW MODAL */}
+            {importPreview && (() => {
+              const mappedRows = computeMapping(importPreview);
+              const matched    = mappedRows.filter(r => r.status === 'matched');
+              const unmatched  = mappedRows.filter(r => r.status === 'unmatched');
+              const allExamsList = safeLS('pba_exams', []) || [];
+              const selectedExam = (allExamsList || []).find(e => e.id === selectedExamId) || activePaperRec;
+              const paperTotal   = selectedExam?.totalMarks || 100;
+              const examTitle    = selectedExam?.subject || selectedExam?.subjectName || selectedExam?.paperName || 'Exam';
 
-                  {/* Header */}
-                  <div style={{ background: 'linear-gradient(135deg,#4F46E5,#7C3AED)',
-                    padding: '18px 24px', borderRadius: '14px 14px 0 0',
-                    display: 'flex', alignItems: 'center',
-                    justifyContent: 'space-between' }}>
-                    <div style={{ fontWeight: 800, fontSize: '15px', color: 'white' }}>
-                      ↑ Bulk Import Marks —{' '}
-                      {activePaperRec?.paperName || `Paper ${markPaperNumber}`}
-                    </div>
-                    <button onClick={() => setShowMarkImport(false)}
-                      style={{ background: 'rgba(255,255,255,0.15)', border: 'none',
-                        color: 'white', borderRadius: '6px', padding: '4px 12px',
-                        cursor: 'pointer', fontSize: '16px' }}>×</button>
-                  </div>
+              return (
+                <div style={{
+                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(0,0,0,0.5)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  zIndex: 9999
+                }}>
+                  <div style={{
+                    background: '#fff', borderRadius: '12px',
+                    padding: '28px 32px', width: '640px',
+                    maxWidth: '92vw', maxHeight: '85vh',
+                    overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
+                  }}>
 
-                  <div style={{ padding: '20px 24px' }}>
+                    {/* Header */}
+                    <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#111827',
+                                 marginTop: 0, marginBottom: '4px' }}>
+                      Import Marks — {examTitle}
+                    </h2>
+                    <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px' }}>
+                      Paper total: <strong>/{paperTotal}</strong> &nbsp;·&nbsp;
+                      {matched.length} matched &nbsp;·&nbsp;
+                      {unmatched.length > 0 && (
+                        <span style={{ color: '#DC2626' }}>
+                          {unmatched.length} unmatched
+                        </span>
+                      )}
+                    </p>
 
-                    {/* Format instructions */}
-                    <div style={{ background: '#F0F4FF', border: '1px solid #C7D2FE',
-                      borderRadius: '10px', padding: '14px 16px', marginBottom: '16px',
-                      fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
-                      <div style={{ fontWeight: 800, marginBottom: '6px' }}>
-                        📋 Required columns:
+                    {/* Column selectors */}
+                    <div style={{ display: 'flex', gap: '16px', marginBottom: '16px',
+                                  flexWrap: 'wrap' }}>
+                      <div>
+                        <label style={{ fontSize: '11px', fontWeight: 600,
+                                         color: '#6B7280', display: 'block',
+                                         marginBottom: '4px' }}>
+                          STUDENT COLUMN
+                        </label>
+                        <select
+                          value={importPreview.nameCol}
+                          onChange={e => setImportPreview(p => ({
+                            ...p, nameCol: parseInt(e.target.value)
+                          }))}
+                          style={{ padding: '6px 10px', border: '1px solid #D1D5DB',
+                                   borderRadius: '6px', fontSize: '13px' }}
+                        >
+                          {importPreview.colNames.map((c, i) => (
+                            <option key={i} value={i}>{c || `Column ${i+1}`}</option>
+                          ))}
+                        </select>
                       </div>
-                      <div style={{ fontFamily: 'monospace', background: 'white',
-                        padding: '8px 10px', borderRadius: '6px',
-                        border: '1px solid #E3E6EA', fontSize: '11px' }}>
-                        Student Name | Raw Marks | Absent (optional)
+                      <div>
+                        <label style={{ fontSize: '11px', fontWeight: 600,
+                                         color: '#6B7280', display: 'block',
+                                         marginBottom: '4px' }}>
+                          SCORE COLUMN
+                        </label>
+                        <select
+                          value={importPreview.scoreCol}
+                          onChange={e => setImportPreview(p => ({
+                            ...p, scoreCol: parseInt(e.target.value)
+                          }))}
+                          style={{ padding: '6px 10px', border: '1px solid #D1D5DB',
+                                   borderRadius: '6px', fontSize: '13px' }}
+                        >
+                          {importPreview.colNames.map((c, i) => (
+                            <option key={i} value={i}>{c || `Column ${i+1}`}</option>
+                          ))}
+                        </select>
                       </div>
-                      <div style={{ marginTop: '8px', color: '#6B7280' }}>
-                        • CSV (.csv) or Excel (.xlsx / .xls) accepted<br/>
-                        • "Student Name" must match the enrolled student's name (case-insensitive)<br/>
-                        • "Raw Marks" is a number out of <strong>{activePaperRec?.totalMarks || '?'}</strong><br/>
-                        • "Absent" column: write <strong>yes</strong> or <strong>1</strong> to mark absent<br/>
-                        • Percentage and grade are auto-calculated — do not include them<br/>
-                        • PDF import is not supported — save as CSV or Excel
-                      </div>
-                    </div>
-
-                    {/* File upload */}
-                    <div style={{ marginBottom: '16px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 700, color: '#374151',
-                        display: 'block', marginBottom: '8px' }}>
-                        Upload File
-                      </label>
-                      <input
-                        type="file"
-                        accept=".csv,.xlsx,.xls"
-                        onChange={e => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          setMarkImportError(''); setMarkImportRows([]);
-                          const ext = file.name.split('.').pop().toLowerCase();
-
-                          if (ext === 'csv') {
-                            const reader = new FileReader();
-                            reader.onload = (ev) => {
-                              try {
-                                const lines = ev.target.result.split('\n').filter(l => l.trim());
-                                if (lines.length < 2) {
-                                  setMarkImportError('File appears empty.'); return; }
-                                const hdrs = lines[0].split(',').map(h =>
-                                  h.trim().toLowerCase().replace(/[^a-z0-9]/g,''));
-                                const nameIdx   = hdrs.findIndex(h =>
-                                  h.includes('name') || h.includes('student'));
-                                const marksIdx  = hdrs.findIndex(h =>
-                                  h.includes('raw') || h.includes('marks') || h.includes('score'));
-                                const absentIdx = hdrs.findIndex(h => h.includes('absent'));
-                                if (nameIdx < 0 || marksIdx < 0) {
-                                  setMarkImportError(
-                                    'Cannot find "Student Name" and "Raw Marks" columns.'); return; }
-                                const parsed = lines.slice(1).map(line => {
-                                  const cols  = line.split(',');
-                                  const name  = (cols[nameIdx] || '').trim();
-                                  const raw   = (cols[marksIdx] || '').trim();
-                                  const absV  = absentIdx >= 0
-                                    ? (cols[absentIdx]||'').trim().toLowerCase() : '';
-                                  const absent = absV==='yes'||absV==='1'||absV==='true'||absV==='absent';
-                                  if (!name) return null;
-                                  return { name, rawMarks: raw==='' ? null : parseFloat(raw), absent };
-                                }).filter(Boolean);
-                                setMarkImportRows(parsed);
-                              } catch { setMarkImportError('Failed to parse CSV.'); }
-                            };
-                            reader.readAsText(file);
-
-                          } else {
-                            // Excel via SheetJS
-                            const script = document.createElement('script');
-                            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-                            script.onload = () => {
-                              const reader = new FileReader();
-                              reader.onload = (ev) => {
-                                try {
-                                  const wb   = window.XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
-                                  const json = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-                                  const parsed = (json || []).map(row => {
-                                    const nameK = Object.keys(row).find(k =>
-                                      k.toLowerCase().includes('name')||k.toLowerCase().includes('student'));
-                                    const markK = Object.keys(row).find(k =>
-                                      k.toLowerCase().includes('raw')||k.toLowerCase().includes('marks'));
-                                    const absnK = Object.keys(row).find(k =>
-                                      k.toLowerCase().includes('absent'));
-                                    const name   = nameK ? String(row[nameK]||'').trim() : '';
-                                    const rawStr = markK ? String(row[markK]||'').trim() : '';
-                                    const absV   = absnK ? String(row[absnK]||'').trim().toLowerCase() : '';
-                                    const absent = absV==='yes'||absV==='1'||absV==='true'||absV==='absent';
-                                    if (!name) return null;
-                                    return { name, rawMarks: rawStr==='' ? null : parseFloat(rawStr), absent };
-                                  }).filter(Boolean);
-                                  setMarkImportRows(parsed);
-                                } catch { setMarkImportError('Failed to parse Excel. Try saving as CSV.'); }
-                              };
-                              reader.readAsArrayBuffer(file);
-                            };
-                            script.onerror = () =>
-                              setMarkImportError('Excel parser failed to load. Please save as .csv and retry.');
-                            document.head.appendChild(script);
-                          }
-                        }}
-                        style={{ display: 'block', width: '100%', padding: '10px',
-                          border: '2px dashed #C7D2FE', borderRadius: '8px',
-                          background: '#F5F7FF', cursor: 'pointer',
-                          fontSize: '13px', color: '#4F46E5' }}
-                      />
                     </div>
 
-                    {/* Error */}
-                    {markImportError && (
-                      <div style={{ padding: '10px 14px', background: '#FEF2F2',
-                        border: '1px solid #FCA5A5', borderRadius: '8px',
-                        fontSize: '12px', color: '#DC2626', fontWeight: 600,
-                        marginBottom: '12px' }}>
-                        ⚠ {markImportError}
-                      </div>
+                    {/* Preview rows */}
+                    <div style={{ border: '1px solid #E5E7EB', borderRadius: '8px',
+                                  overflow: 'hidden', marginBottom: '20px' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse',
+                                       fontSize: '13px' }}>
+                        <thead>
+                          <tr style={{ background: '#F9FAFB' }}>
+                            <th style={{ padding: '8px 12px', textAlign: 'left',
+                                          fontWeight: 600, color: '#374151',
+                                          borderBottom: '1px solid #E5E7EB' }}>
+                              CSV Value
+                            </th>
+                            <th style={{ padding: '8px 12px', textAlign: 'left',
+                                          fontWeight: 600, color: '#374151',
+                                          borderBottom: '1px solid #E5E7EB' }}>
+                              Matched Student
+                            </th>
+                            <th style={{ padding: '8px 12px', textAlign: 'center',
+                                          fontWeight: 600, color: '#374151',
+                                          borderBottom: '1px solid #E5E7EB' }}>
+                              Raw Score
+                            </th>
+                            <th style={{ padding: '8px 12px', textAlign: 'center',
+                                          fontWeight: 600, color: '#374151',
+                                          borderBottom: '1px solid #E5E7EB' }}>
+                              %
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {mappedRows.map((row, i) => (
+                            <tr key={i} style={{
+                              background: row.status === 'unmatched'
+                                ? '#FEF2F2' : '#ffffff',
+                              borderBottom: '1px solid #F3F4F6'
+                            }}>
+                              <td style={{ padding: '8px 12px', color: '#374151' }}>
+                                {row.csvValue || '—'}
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>
+                                {row.status === 'matched'
+                                  ? <span style={{ color: '#065F46', fontWeight: 600 }}>
+                                      ✓ {row.studentName}
+                                    </span>
+                                  : <span style={{ color: '#DC2626', fontSize: '12px' }}>
+                                      ✗ No match
+                                    </span>
+                                }
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center',
+                                            fontWeight: 600, color: '#111827' }}>
+                                {row.rawScore !== null ? row.rawScore : '—'}
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center',
+                                            color: '#6B7280', fontSize: '12px' }}>
+                                {row.rawScore !== null
+                                  ? `${Math.round(row.rawScore / paperTotal * 1000) / 10}%`
+                                  : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {unmatched.length > 0 && (
+                      <p style={{ fontSize: '12px', color: '#B45309',
+                                   background: '#FEF3C7', borderRadius: '6px',
+                                   padding: '8px 12px', marginBottom: '16px' }}>
+                        ⚠️ {unmatched.length} row(s) could not be matched to enrolled
+                        students. They will be skipped. Check that names or reg numbers
+                        in the CSV match those in the system.
+                      </p>
                     )}
 
-                    {/* Preview table */}
-                    {(markImportRows || []).length > 0 && (() => {
-                      const totalMks = activePaperRec?.totalMarks || 100;
-                      return (
-                        <div>
-                          <div style={{ fontSize: '13px', fontWeight: 700,
-                            color: '#374151', marginBottom: '8px' }}>
-                            Preview — {markImportRows.length} rows found
-                          </div>
-                          <div style={{ maxHeight: '220px', overflowY: 'auto',
-                            border: '1px solid #E3E6EA', borderRadius: '8px' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse',
-                              fontSize: '12px' }}>
-                              <thead>
-                                <tr style={{ background: '#F8F9FB',
-                                  borderBottom: '1px solid #E3E6EA' }}>
-                                  {['Student Name',`Raw Marks (/${totalMks})`,
-                                    '%','Grade','Absent'].map(h => (
-                                    <th key={h} style={{ padding: '8px 12px', textAlign: 'left',
-                                      fontWeight: 700, color: '#6B7280', fontSize: '10px',
-                                      textTransform: 'uppercase' }}>{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {(markImportRows || []).map((row, i) => {
-                                  const pct = (!row.absent && row.rawMarks !== null)
-                                    ? Math.round((row.rawMarks/totalMks)*1000)/10 : null;
-                                  const grade = row.absent ? 'ABS' : calcGrade(pct);
-                                  return (
-                                    <tr key={i} style={{ borderBottom: '1px solid #F1F5F9',
-                                      background: i%2===0 ? 'white' : '#FAFAFA' }}>
-                                      <td style={{ padding: '7px 12px' }}>{row.name}</td>
-                                      <td style={{ padding: '7px 12px', textAlign: 'center',
-                                        fontWeight: 700 }}>
-                                        {row.absent ? '—' : (row.rawMarks ?? '—')}
-                                      </td>
-                                      <td style={{ padding: '7px 12px', textAlign: 'center',
-                                        fontWeight: 700,
-                                        color: pct!==null?(pct>=40?'#059669':'#DC2626'):'#9CA3AF' }}>
-                                        {row.absent?'ABS':pct!==null?`${pct}%`:'—'}
-                                      </td>
-                                      <td style={{ padding: '7px 12px', textAlign: 'center',
-                                        fontWeight: 800, color: gradeColor(grade) }}>{grade}</td>
-                                      <td style={{ padding: '7px 12px', textAlign: 'center',
-                                        color: row.absent ? '#D97706' : '#D1D5DB' }}>
-                                        {row.absent ? 'Yes' : '—'}
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Footer */}
-                  <div style={{ padding: '14px 24px 20px',
-                    display: 'flex', justifyContent: 'flex-end', gap: '10px',
-                    borderTop: '1px solid #F1F5F9' }}>
-                    <button onClick={() => setShowMarkImport(false)}
-                      style={{ padding: '9px 20px', borderRadius: '8px',
-                        border: '1px solid #E3E6EA', background: 'white',
-                        color: '#374151', fontSize: '13px', fontWeight: 600,
-                        cursor: 'pointer' }}>
-                      Cancel
-                    </button>
-                    <button
-                      disabled={(markImportRows || []).length === 0}
-                      onClick={() => {
-                        if ((markImportRows || []).length === 0) return;
-                        const batchId  = activeSessionGroup?.batchId || '';
-                        const students = (safeLS('pba_students', []) || [])
-                          .filter(s => s.batchId === batchId);
-                        const totalMks = activePaperRec?.totalMarks || 100;
-                        const passMks  = activePaperRec?.passMarks  || 40;
-                        const now = new Date().toISOString();
-                        const existing = safeLS('pba_exam_results', []);
-                        let updated = [...(existing || [])];
-                        (markImportRows || []).forEach(row => {
-                          const student = (students || []).find(s =>
-                            (s.name||'').toLowerCase().trim() ===
-                            (row.name||'').toLowerCase().trim()
-                          );
-                          if (!student) return;
-                          const rawNum = row.absent ? null
-                            : row.rawMarks !== null ? parseFloat(row.rawMarks) : null;
-                          const pct = (!row.absent && rawNum !== null)
-                            ? Math.round((rawNum/totalMks)*1000)/10 : null;
-                          const record = {
-                            id: `result_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
-                            examSessionId:   markExamSessionId,
-                            examSessionName: activeSessionGroup?.examSessionName || '',
-                            batchId,
-                            batchName:   activeSessionGroup?.batchName || '',
-                            subjectId:   markSubjectId,
-                            subjectCode: activePaperRec?.subjectCode || '',
-                            subjectName: activePaperRec?.subjectName || '',
-                            paperNumber: Number(markPaperNumber),
-                            paperName:   activePaperRec?.paperName || `Paper ${markPaperNumber}`,
-                            totalMarks:  totalMks,
-                            passMarks:   passMks,
-                            studentId:   student.id,
-                            studentName: student.name || row.name,
-                            rawMarks:    rawNum,
-                            percentage:  pct,
-                            grade:       row.absent ? 'ABS' : calcGrade(pct),
-                            isPassed:    !row.absent && rawNum !== null && rawNum >= passMks,
-                            absent:      row.absent || false,
-                            enteredAt:   now, updatedAt: now
-                          };
-                          const idx = updated.findIndex(r =>
-                            r.examSessionId === record.examSessionId &&
-                            r.subjectId === record.subjectId &&
-                            Number(r.paperNumber) === Number(record.paperNumber) &&
-                            r.studentId === record.studentId
-                          );
-                          if (idx >= 0) updated[idx] = record;
-                          else updated.push(record);
-                        });
-                        saveLS('pba_exam_results', updated);
-                        setExamResults(updated);
-                        setShowMarkImport(false);
-                        setMarkImportRows([]);
-                      }}
-                      style={{ padding: '9px 20px', borderRadius: '8px', border: 'none',
-                        background: (markImportRows||[]).length>0 ? '#4F46E5' : '#E5E7EB',
-                        color: (markImportRows||[]).length>0 ? 'white' : '#9CA3AF',
-                        fontSize: '13px', fontWeight: 700,
-                        cursor: (markImportRows||[]).length>0 ? 'pointer' : 'not-allowed' }}>
-                      ✓ Import {(markImportRows || []).length} Students
-                    </button>
+                    {/* Action buttons */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                      <button
+                        onClick={() => setImportPreview(null)}
+                        style={{ padding: '9px 20px', border: '1px solid #D1D5DB',
+                                  borderRadius: '8px', background: '#fff',
+                                  fontSize: '13px', fontWeight: 600,
+                                  color: '#374151', cursor: 'pointer' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => handleConfirmImport(mappedRows, paperTotal)}
+                        disabled={matched.length === 0}
+                        style={{
+                          padding: '9px 24px', border: 'none', borderRadius: '8px',
+                          background: matched.length > 0 ? '#2563EB' : '#D1D5DB',
+                          color: '#fff', fontSize: '13px', fontWeight: 700,
+                          cursor: matched.length > 0 ? 'pointer' : 'not-allowed'
+                        }}
+                      >
+                        ✓ Import {matched.length} Mark{matched.length !== 1 ? 's' : ''}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         );
       })()}
@@ -4089,7 +4290,7 @@ export const ExamManagementView = ({ isMobile }) => {
               <button type="button" onClick={() => setShowImportModal(false)} style={{ background: "#FFFFFF", color: "#4A5568", border: "1px solid #E3E6EA", borderRadius: "8px", padding: "8px 16px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
               <button
                 type="button"
-                onClick={handleConfirmImport}
+                onClick={handleConfirmLegacyImport}
                 style={{ background: 'linear-gradient(135deg, #2B6CB0, #1A4A8A)', color: '#FFFFFF', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(43,108,176,0.30)' }}
               >
                 Confirm Import
