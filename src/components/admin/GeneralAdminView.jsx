@@ -137,7 +137,7 @@ export const syncStudentsToBatches = () => {
           name:        student.name        || student.studentName || '',
           mobilePhone: student.mobilePhone || student.phone || '',
           parentPhone: student.parentPhone || '',
-          status:      student.status      || 'active',
+          status:      (student.status || 'active').toString().trim().toLowerCase(),
           stream:      student.stream      || null,
           subjects:    student.subjects    || [],
           enrolledAt:  student.enrolledAt  || student.createdAt
@@ -471,6 +471,11 @@ export const GeneralAdminView = ({ isMobile }) => {
   // Subjects & Batches state
   const [subjects, setSubjects] = useState(() => safeLS("pba_subjects", []));
   const [batches, setBatches] = useState(() => safeLS("pba_batches", DEFAULT_BATCHES));
+  const refreshBatches = () => {
+    const fresh = safeLS('pba_batches', []) || [];
+    setBatches(fresh);
+    return fresh;
+  };
   const [classrooms, setClassrooms] = useState(() => {
     const existing = safeLS("pba_classrooms", []);
     return (Array.isArray(existing) && existing.length > 0) ? existing : DEFAULT_CLASSROOMS;
@@ -730,6 +735,7 @@ export const GeneralAdminView = ({ isMobile }) => {
     }));
     saveLS('pba_batches', _updatedBatches);
     setBatches(_updatedBatches);
+    refreshBatches();
 
     if (enrolledPanelBatch) {
       setEnrolledPanelBatch(prev => ({
@@ -1198,6 +1204,7 @@ export const GeneralAdminView = ({ isMobile }) => {
 
     setBatches(updated);
     saveLS("pba_batches", updated);
+    refreshBatches();
     setShowBatchModal(false);
   };
 
@@ -1206,6 +1213,7 @@ export const GeneralAdminView = ({ isMobile }) => {
       const updated = batches.filter((b) => b.id !== id);
       setBatches(updated);
       saveLS("pba_batches", updated);
+      refreshBatches();
     }
   };
 
@@ -2106,8 +2114,10 @@ export const GeneralAdminView = ({ isMobile }) => {
               const ruleCount = (batch.noClashRules || []).length;
               const schedCount = new Set(sessions.filter((s) => s.batchId === batch.id).map((s) => s.subjectId)).size;
 
-              const activeEnrollments = batchEnrollments.filter((e) => e.batchId === batch.id && e.status === "active");
-              const enrolledCount = Math.max((batch.students || []).length, activeEnrollments.length);
+              const normalizeStatus = s => (s || '').toString().trim().toLowerCase();
+              const activeEnrollments = (batchEnrollments || []).filter((e) => e.batchId === batch.id && normalizeStatus(e.status || 'active') === "active");
+              const activeBatchStudents = (batch.students || []).filter((s) => normalizeStatus(s.status || 'active') === "active");
+              const enrolledCount = Math.max(activeBatchStudents.length, activeEnrollments.length);
 
               let lvlBg = "#EBF4FF";
               let lvlColor = "#2B6CB0";
@@ -4336,8 +4346,9 @@ export const GeneralAdminView = ({ isMobile }) => {
                 </h3>
                 <div style={{ fontSize: "12px", color: "#718096", marginTop: "2px" }}>
                   {(() => {
-                    const fromBatch = (enrolledPanelBatch.students || []).filter(s => s.status !== 'withdrawn').length;
-                    const fromEnr = batchEnrollments.filter(e => e.batchId === enrolledPanelBatch.id && e.status === "active").length;
+                    const normalizeStatus = s => (s || '').toString().trim().toLowerCase();
+                    const fromBatch = (enrolledPanelBatch.students || []).filter(s => normalizeStatus(s.status || 'active') === 'active').length;
+                    const fromEnr = (batchEnrollments || []).filter(e => e.batchId === enrolledPanelBatch.id && normalizeStatus(e.status || 'active') === "active").length;
                     return Math.max(fromBatch, fromEnr);
                   })()} enrolled
                 </div>
@@ -4349,6 +4360,7 @@ export const GeneralAdminView = ({ isMobile }) => {
 
             {/* Tabs & Search */}
             {(() => {
+              const normalize = s => (s || '').toString().trim().toLowerCase();
               const pbaStudents = safeLS('pba_students', []) || [];
               const studentMap = new Map();
 
@@ -4362,12 +4374,12 @@ export const GeneralAdminView = ({ isMobile }) => {
                   name: bs.name || pProfile.name || sid,
                   stream: pProfile.stream || bs.stream || null,
                   subjects: (pProfile.subjects && pProfile.subjects.length > 0) ? pProfile.subjects : (bs.subjects || []),
-                  status: bs.status || 'active',
+                  status: normalize(bs.status || 'active'),
                   enrolledAt: bs.enrolledAt || pProfile.enrolledAt || ''
                 });
               });
 
-              batchEnrollments.filter(e => e.batchId === enrolledPanelBatch.id).forEach(enr => {
+              (batchEnrollments || []).filter(e => e.batchId === enrolledPanelBatch.id).forEach(enr => {
                 const sid = (enr.studentId || '').toString();
                 if (!sid) return;
                 const pProfile = pbaStudents.find(p => (p.id || p.regNo || '').toString() === sid)
@@ -4381,7 +4393,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                     name: pProfile.name || sid,
                     stream: pProfile.stream || enr.stream || null,
                     subjects: (pProfile.subjects && pProfile.subjects.length > 0) ? pProfile.subjects : (enr.subjectIds || enr.subjects || []),
-                    status: enr.status || 'active',
+                    status: normalize(enr.status || 'active'),
                     enrolledAt: enr.enrolledAt || pProfile.enrolledAt || ''
                   });
                 } else {
@@ -4401,7 +4413,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                   <div style={{ padding: "14px 24px", borderBottom: "1px solid #F0F2F5", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
                     <div style={{ display: "flex", background: "#F0F2F5", padding: "3px", borderRadius: "8px" }}>
                       {["active", "withdrawn", "completed"].map(t => {
-                        const count = allEnrolledStudents.filter(s => (s.status || 'active') === t).length;
+                        const count = allEnrolledStudents.filter(s => normalize(s.status || 'active') === t).length;
                         return (
                           <button
                             key={t}
@@ -4436,7 +4448,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                   {/* Student List */}
                   <div style={{ flex: 1, overflowY: "auto", maxHeight: "380px" }}>
                     {(() => {
-                      const tabList = allEnrolledStudents.filter(s => (s.status || 'active') === enrolledTab);
+                      const tabList = allEnrolledStudents.filter(s => normalize(s.status || 'active') === enrolledTab);
                       const filtered = tabList.filter(st => {
                         if (enrolledSearch) {
                           const q = enrolledSearch.toLowerCase();
@@ -4566,6 +4578,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                                     );
                                     saveLS('pba_batches', updatedBatches);
                                     setBatches(updatedBatches);
+                                    refreshBatches();
                                     setEnrolledPanelBatch(prev => ({
                                       ...prev,
                                       students: (prev.students || []).map(s =>
@@ -4803,17 +4816,21 @@ export const GeneralAdminView = ({ isMobile }) => {
 
                   <div style={{ maxHeight: "280px", overflowY: "auto", border: "1px solid #E3E6EA", borderRadius: "8px", padding: "6px" }}>
                     {(() => {
-                      const _enrolledIdsInThisBatch = new Set([
-                        ...(enrolledPanelBatch?.students || []).map(s => (s.id || s.regNo || '').toString()),
-                        ...batchEnrollments.filter(e => e.batchId === enrolledPanelBatch.id && e.status === "active").map(e => (e.studentId || '').toString())
-                      ]);
+                      const thisBatch = (safeLS('pba_batches', []) || [])
+                        .find(b => b.id === enrolledPanelBatch?.id) || enrolledPanelBatch;
+
+                      const enrolledInThisBatch = new Set(
+                        ((thisBatch?.students) || [])
+                          .map(s => (s.id || s.regNo || s.studentId || '').toString())
+                          .filter(Boolean)
+                      );
 
                       const pbaAllStudents = safeLS('pba_students', []) || [];
                       const sourceStudents = pbaAllStudents.length > 0 ? pbaAllStudents : (students.length > 0 ? students : (data.students || []));
 
-                      const unEnrolledList = sourceStudents.filter(s => {
-                        const sid = (s.id || s.regNo || '').toString();
-                        if (!sid || _enrolledIdsInThisBatch.has(sid)) return false;
+                      const availableStudents = (sourceStudents || []).filter(s => {
+                        const sid = (s.id || s.regNo || s.studentId || '').toString();
+                        if (!sid || enrolledInThisBatch.has(sid)) return false;
                         if (enrollSearchQuery) {
                           const q = enrollSearchQuery.toLowerCase();
                           return (s.name || '').toLowerCase().includes(q) || (s.regNo || '').toLowerCase().includes(q);
@@ -4821,11 +4838,11 @@ export const GeneralAdminView = ({ isMobile }) => {
                         return true;
                       });
 
-                      if (unEnrolledList.length === 0) {
+                      if (availableStudents.length === 0) {
                         return <div style={{ padding: "10px", fontSize: "12px", color: "#A0AEC0", textAlign: "center" }}>No available students found</div>;
                       }
 
-                      return unEnrolledList.map(st => {
+                      return availableStudents.map(st => {
                         const isChecked = enrollSelectedStudentIds.includes(st.id);
                         return (
                           <label key={st.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 8px", cursor: "pointer", borderBottom: "1px solid #F0F2F5" }}>
@@ -5059,6 +5076,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                       );
                       saveLS('pba_batches', updatedBatches);
                       setBatches(updatedBatches);
+                      refreshBatches();
                       if (enrolledPanelBatch) {
                         setEnrolledPanelBatch(prev => ({
                           ...prev,
@@ -5099,7 +5117,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                           name: s.name || existing.name || '',
                           mobilePhone: s.mobilePhone || existing.mobilePhone || '',
                           parentPhone: s.parentPhone || existing.parentPhone || '',
-                          status: s.status || existing.status || 'active',
+                          status: (s.status || existing.status || 'active').toString().trim().toLowerCase(),
                           stream: s.stream || existing.stream || null,
                           subjects: (s.subjects && s.subjects.length > 0) ? s.subjects : (existing.subjects || []),
                           batchId: enrolledPanelBatch.id,
@@ -5112,6 +5130,7 @@ export const GeneralAdminView = ({ isMobile }) => {
 
                       // Automatic sync to batches
                       syncStudentsToBatches();
+                      refreshBatches();
 
                       // Reset and close
                       setEnrollStep(1);

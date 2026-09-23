@@ -107,7 +107,7 @@ const syncStudentsToBatches = () => {
           name:        student.name        || student.studentName || '',
           mobilePhone: student.mobilePhone || student.phone || '',
           parentPhone: student.parentPhone || '',
-          status:      student.status      || 'active',
+          status:      (student.status || 'active').toString().trim().toLowerCase(),
           stream:      student.stream      || null,
           subjects:    student.subjects    || [],
           enrolledAt:  student.enrolledAt  || student.createdAt
@@ -220,7 +220,7 @@ export const StudentManagementView = ({ isMobile }) => {
         phone:       s.mobilePhone || s.phone       || '',
         parentPhone: s.parentPhone || '',
         email:       s.email       || '',
-        status:      s.status      || 'active',
+        status:      (s.status || 'active').toString().trim().toLowerCase(),
         batches:     [],
         batchIds:    []
       };
@@ -243,7 +243,7 @@ export const StudentManagementView = ({ isMobile }) => {
             phone:       s.mobilePhone || s.phone       || '',
             parentPhone: s.parentPhone || '',
             email:       s.email       || '',
-            status:      s.status      || 'active',
+            status:      (s.status || 'active').toString().trim().toLowerCase(),
             batches:     [],
             batchIds:    []
           };
@@ -444,7 +444,7 @@ export const StudentManagementView = ({ isMobile }) => {
       regNo,
       branch: studentForm.branch || effectiveBranch || "Kohuwala",
       enrolmentDate: new Date().toISOString().split("T")[0],
-      status: "Active",
+      status: "active",
       batchId: finalBatchId,
       batchName: finalBatchName,
       batch: finalBatchName,
@@ -468,7 +468,7 @@ export const StudentManagementView = ({ isMobile }) => {
       phone:       savedStudent.phone || savedStudent.mobilePhone || '',
       parentPhone: savedStudent.parentPhone || '',
       email:       savedStudent.email || '',
-      status:      savedStudent.status || 'active',
+      status:      (savedStudent.status || 'active').toString().trim().toLowerCase(),
       batchId:     finalBatchId || '',
       batch:       finalBatchName || '',
       batchName:   finalBatchName || '',
@@ -633,7 +633,7 @@ export const StudentManagementView = ({ isMobile }) => {
         batchName: r.batchName || "",
         batchEnrolled: r.batchName || "",
         enrolledAt: new Date().toISOString().split("T")[0],
-        status: "Active",
+        status: "active",
         registeredBy: currentUser.name || "Admin",
         importedVia: "csv"
       };
@@ -1038,13 +1038,13 @@ export const StudentManagementView = ({ isMobile }) => {
                       {st.parentPhone}
                     </td>
                     <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
-                      {st.status === "Active" ? (
+                      {(st.status || '').toLowerCase() === "active" ? (
                         <span style={{ background: theme.successLight, color: theme.success, border: '1px solid ' + theme.successBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#38A169', display: 'inline-block' }} />
                           Active
                         </span>
                       ) : (
-                        <span style={{ background: theme.dangerLight, color: theme.danger, border: '1px solid ' + theme.dangerBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <span style={{ background: theme.dangerLight, color: theme.danger, border: '1px solid ' + theme.dangerBorder, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '5px', textTransform: 'capitalize' }}>
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#E53E3E', display: 'inline-block' }} />
                           {st.status}
                         </span>
