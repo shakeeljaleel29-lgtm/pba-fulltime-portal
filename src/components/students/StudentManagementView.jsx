@@ -43,6 +43,115 @@ const saveLS = (key, value) => {
   }
 };
 
+const DEFAULT_SUBJECTS = [
+  'Biology', 'Physics', 'Chemistry', 'Mathematics',
+  'Accounts', 'Business Studies', 'Economics',
+  'English', 'General Paper', 'History'
+];
+
+const syncStudentsToBatches = () => {
+  const _allStudents = safeLS('pba_students', []) || [];
+  const _allBatches  = safeLS('pba_batches',  []) || [];
+  if (!_allStudents.length || !_allBatches.length) return 0;
+
+  // Build lookup maps for fast access
+  const _batchById   = {};
+  const _batchByName = {};
+  _allBatches.forEach(b => {
+    if (b.id)   _batchById[b.id]             = b;
+    if (b.name) _batchByName[b.name.trim().toLowerCase()] = b;
+  });
+
+  let _added = 0;
+
+  _allStudents.forEach(student => {
+    // Try every possible field name the batch reference might be stored in
+    const batchRef =
+      student.batchId        ||
+      student.batch          ||
+      student.batchEnrolled  ||
+      student.batchName      ||
+      student.class          ||
+      student.group          ||
+      null;
+
+    if (!batchRef) return;
+
+    // Find the batch by ID first, then by name (case-insensitive)
+    const targetBatch =
+      _batchById[batchRef] ||
+      _batchByName[(batchRef + '').trim().toLowerCase()] ||
+      null;
+
+    if (!targetBatch) return;
+
+    const sid = student.id || student.regNo || student.studentId;
+    if (!sid) return;
+
+    const existingIds = new Set(
+      (targetBatch.students || []).map(s =>
+        (s.id || s.regNo || s.studentId || '').toString()
+      )
+    );
+
+    if (existingIds.has(sid.toString())) return;  // already there
+
+    // Add to the batch
+    _batchById[targetBatch.id] = {
+      ...targetBatch,
+      students: [
+        ...(targetBatch.students || []),
+        {
+          id:          sid,
+          regNo:       student.regNo       || student.id || '',
+          name:        student.name        || student.studentName || '',
+          mobilePhone: student.mobilePhone || student.phone || '',
+          parentPhone: student.parentPhone || '',
+          status:      student.status      || 'active',
+          stream:      student.stream      || null,
+          subjects:    student.subjects    || [],
+          enrolledAt:  student.enrolledAt  || student.createdAt
+                       || new Date().toISOString()
+        }
+      ]
+    };
+    // Keep _batchByName in sync too (same object reference)
+    if (targetBatch.name) {
+      _batchByName[targetBatch.name.trim().toLowerCase()] =
+        _batchById[targetBatch.id];
+    }
+    _added++;
+  });
+
+  if (_added > 0) {
+    saveLS('pba_batches', Object.values(_batchById));
+    const _currentEnr = safeLS('pba_batch_enrollments', []) || [];
+    const _enrKeySet = new Set(_currentEnr.map(e => `${e.batchId}_${e.studentId}`));
+    const _newEnrs = [];
+    Object.values(_batchById).forEach(b => {
+      (b.students || []).forEach(st => {
+        const key = `${b.id}_${st.id}`;
+        if (!_enrKeySet.has(key)) {
+          _newEnrs.push({
+            id: "enr-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+            studentId: st.id,
+            batchId: b.id,
+            stream: st.stream || null,
+            subjectIds: st.subjects || [],
+            enrolledAt: st.enrolledAt || new Date().toISOString(),
+            status: "active"
+          });
+          _enrKeySet.add(key);
+        }
+      });
+    });
+    if (_newEnrs.length > 0) {
+      saveLS('pba_batch_enrollments', [..._currentEnr, ..._newEnrs]);
+    }
+  }
+  return _added;
+};
+
 export const StudentManagementView = ({ isMobile }) => {
   const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
   const { data, setData, addStudent, currentUser, exportToCSV, effectiveBranch } = useApp();
@@ -51,7 +160,32 @@ export const StudentManagementView = ({ isMobile }) => {
   // Batches state — for filter dropdown
   const [batches, setBatches] = useState(() => safeLS('pba_batches', []));
 
-  // ── STUDENT LIST: pull from pba_batches (source of truth) ──
+  // Seed pba_streams if key does not exist
+  useEffect(() => {
+    if (!safeLS('pba_streams', null)) {
+      saveLS('pba_streams', [
+        { id: 'sci', name: 'Science' },
+        { id: 'com', name: 'Commerce' },
+        { id: 'arts', name: 'Arts' }
+      ]);
+    }
+  }, []);
+
+  const subjectOptions = (() => {
+    const fromStore = (safeLS('pba_subjects', []) || [])
+      .map(s => (typeof s === 'string' ? s : s.name))
+      .filter(Boolean);
+    return fromStore.length ? fromStore : DEFAULT_SUBJECTS;
+  })();
+
+  const streamOptions = (() => {
+    const fromStore = (safeLS('pba_streams', []) || [])
+      .map(s => (typeof s === 'string' ? s : s.name))
+      .filter(Boolean);
+    return fromStore.length ? fromStore : ['Science', 'Commerce', 'Arts'];
+  })();
+
+  // ── STUDENT LIST: pull from pba_students and pba_batches ──
   const buildStudentList = () => {
     const rawBatches  = safeLS('pba_batches',  []);
     const rawStudents = safeLS('pba_students', []);
@@ -80,9 +214,12 @@ export const StudentManagementView = ({ isMobile }) => {
         id:          key,
         regNo:       s.regNo       || '',
         name:        s.name        || s.studentName || '',
+        stream:      s.stream      || null,
+        subjects:    Array.isArray(s.subjects) ? s.subjects : (typeof s.subjects === 'string' ? s.subjects.split(',').map(x => x.trim()).filter(Boolean) : []),
         mobilePhone: s.mobilePhone || s.phone       || '',
         phone:       s.mobilePhone || s.phone       || '',
         parentPhone: s.parentPhone || '',
+        email:       s.email       || '',
         status:      s.status      || 'active',
         batches:     [],
         batchIds:    []
@@ -100,13 +237,21 @@ export const StudentManagementView = ({ isMobile }) => {
             id:          key,
             regNo:       s.regNo       || '',
             name:        s.name        || s.studentName || '',
+            stream:      s.stream      || null,
+            subjects:    Array.isArray(s.subjects) ? s.subjects : (typeof s.subjects === 'string' ? s.subjects.split(',').map(x => x.trim()).filter(Boolean) : []),
             mobilePhone: s.mobilePhone || s.phone       || '',
             phone:       s.mobilePhone || s.phone       || '',
             parentPhone: s.parentPhone || '',
+            email:       s.email       || '',
             status:      s.status      || 'active',
             batches:     [],
             batchIds:    []
           };
+        } else {
+          if (!map[key].stream && s.stream) map[key].stream = s.stream;
+          if ((!map[key].subjects || map[key].subjects.length === 0) && s.subjects) {
+            map[key].subjects = Array.isArray(s.subjects) ? s.subjects : [s.subjects];
+          }
         }
         const bName = batch.name || '';
         if (bName && !map[key].batches.includes(bName)) {
@@ -122,6 +267,8 @@ export const StudentManagementView = ({ isMobile }) => {
       if (!key || map[key]) return;
       map[key] = {
         ...s,
+        stream:      s.stream || null,
+        subjects:    Array.isArray(s.subjects) ? s.subjects : [],
         mobilePhone: s.phone || s.mobilePhone || '',
         phone:       s.phone || s.mobilePhone || '',
         batches:     [],
@@ -134,80 +281,10 @@ export const StudentManagementView = ({ isMobile }) => {
 
   const [students, setStudents] = useState(() => buildStudentList());
 
-  // ── FIX 3: Backfill — repair students already imported before this fix ──
+  // ── FIX: Backfill on mount ──
   useEffect(() => {
-    const _pbaStudents = safeLS('pba_students', []);
-    const _ctxStudents = Array.isArray(data?.students) ? data.students : [];
-    // Combine unique students from pba_students and data.students
-    const _studentMap = {};
-    (_ctxStudents || []).forEach(s => {
-      const k = s.id || s.regNo;
-      if (k) _studentMap[k] = s;
-    });
-    (_pbaStudents || []).forEach(s => {
-      const k = s.id || s.regNo;
-      if (k) _studentMap[k] = { ..._studentMap[k], ...s };
-    });
-    const _allStudents = Object.values(_studentMap);
-    const _allBatches  = safeLS('pba_batches',  []);
-
-    if (!_allStudents?.length || !_allBatches?.length) {
-      setBatches(safeLS('pba_batches', []));
-      setStudents(buildStudentList());
-      return;
-    }
-
-    let _changed = false;
-    const _batchMap = {};
-    (_allBatches || []).forEach(b => { _batchMap[b.id] = b; });
-
-    (_allStudents || []).forEach(student => {
-      const batchRef = student.batchId || student.batch
-                    || student.batchEnrolled || student.batchName;
-      if (!batchRef) return;
-
-      // Try matching by ID first, then by name
-      const targetBatch =
-        _batchMap[batchRef] ||
-        Object.values(_batchMap).find(b => b.name === batchRef);
-
-      if (!targetBatch) return;
-
-      const sid = student.id || student.regNo;
-      if (!sid) return;
-
-      const existingIds = new Set(
-        (targetBatch.students || []).map(s => s.id || s.regNo)
-      );
-      if (existingIds.has(sid)) return;   // already there — skip
-
-      // Student is missing from this batch — add them
-      _batchMap[targetBatch.id] = {
-        ...targetBatch,
-        students: [
-          ...(targetBatch.students || []),
-          {
-            id:          sid,
-            regNo:       student.regNo       || '',
-            name:        student.name        || student.studentName || '',
-            mobilePhone: student.mobilePhone || student.phone || '',
-            parentPhone: student.parentPhone || '',
-            status:      student.status      || 'active',
-            enrolledAt:  student.enrolledAt  || student.createdAt
-                         || new Date().toISOString()
-          }
-        ]
-      };
-      _changed = true;
-    });
-
-    if (_changed) {
-      const _updated = Object.values(_batchMap);
-      saveLS('pba_batches', _updated);
-      setBatches(_updated);
-    } else {
-      setBatches(_allBatches);
-    }
+    syncStudentsToBatches();
+    setBatches(safeLS('pba_batches', []));
     setStudents(buildStudentList());
   }, []);
   // ── End student list ──
@@ -237,7 +314,8 @@ export const StudentManagementView = ({ isMobile }) => {
     batchId: "",
     batchName: "",
     batch: "",
-    subjects: "Business Studies, Accounting, Economics",
+    stream: null,
+    subjects: [],
     phone: "",
     parentPhone: "",
     email: "",
@@ -300,7 +378,8 @@ export const StudentManagementView = ({ isMobile }) => {
       batchId: defaultBatch?.id || "",
       batchName: defaultBatch?.name || "",
       batch: defaultBatch?.name || "",
-      subjects: "Business Studies, Accounting, Economics",
+      stream: null,
+      subjects: [],
       phone: "",
       parentPhone: "",
       email: "",
@@ -371,20 +450,24 @@ export const StudentManagementView = ({ isMobile }) => {
       batch: finalBatchName,
       batches: finalBatchName ? [finalBatchName] : [],
       batchIds: finalBatchId ? [finalBatchId] : [],
-      subjects: typeof studentForm.subjects === "string" ? studentForm.subjects.split(",").map((s) => s.trim()) : studentForm.subjects
+      stream: studentForm.stream || null,
+      subjects: Array.isArray(studentForm.subjects) ? studentForm.subjects : []
     };
 
     addStudent(savedStudent);
 
-    // Save student profile to pba_students
+    // Save student profile to pba_students (Single source of truth)
     const existingProfiles = safeLS('pba_students', []);
     const newStudentProfile = {
       id:          newStudentId,
       regNo:       savedStudent.regNo || '',
       name:        savedStudent.name  || '',
+      stream:      studentForm.stream || null,
+      subjects:    Array.isArray(studentForm.subjects) ? studentForm.subjects : [],
       mobilePhone: savedStudent.phone || savedStudent.mobilePhone || '',
       phone:       savedStudent.phone || savedStudent.mobilePhone || '',
       parentPhone: savedStudent.parentPhone || '',
+      email:       savedStudent.email || '',
       status:      savedStudent.status || 'active',
       batchId:     finalBatchId || '',
       batch:       finalBatchName || '',
@@ -397,54 +480,29 @@ export const StudentManagementView = ({ isMobile }) => {
       ...(existingProfiles || [])
     ]);
 
-    // ── FIX 2: Sync new student into pba_batches ──
-    const _newBatchRef = studentForm.batchId
-      || studentForm.batch
-      || studentForm.batchEnrolled
-      || finalBatchId
-      || finalBatchName
-      || selectedBatch?.id
-      || selectedBatch?.name;
-
-    if (_newBatchRef) {
-      const _allBatches = safeLS('pba_batches', []);
-      const _updatedBatches = (_allBatches || []).map(batch => {
-        if (batch.id !== _newBatchRef && batch.name !== _newBatchRef)
-          return batch;
-
-        const alreadyIn = (batch.students || []).some(s =>
-          (s.id || s.regNo) === (savedStudent.id || savedStudent.regNo || newStudentId)
-        );
-        if (alreadyIn) return batch;
-
-        return {
-          ...batch,
-          students: [
-            ...(batch.students || []),
-            {
-              id:          savedStudent.id || savedStudent.regNo || newStudentId || '',
-              regNo:       savedStudent.regNo || '',
-              name:        savedStudent.name || '',
-              mobilePhone: savedStudent.phone || savedStudent.mobilePhone || '',
-              parentPhone: savedStudent.parentPhone || '',
-              status:      savedStudent.status || 'active',
-              enrolledAt:  new Date().toISOString()
-            }
-          ]
-        };
-      });
-      saveLS('pba_batches', _updatedBatches);
-      setBatches(_updatedBatches);
-    }
-    // ── End sync ──
-
+    // PART C: Sync to batches immediately
+    syncStudentsToBatches();
+    setBatches(safeLS('pba_batches', []));
     setStudents(buildStudentList());
     setShowAddStudentModal(false);
+    setStudentForm({
+      name: "",
+      dob: "",
+      batchId: "",
+      batchName: "",
+      batch: "",
+      stream: null,
+      subjects: [],
+      phone: "",
+      parentPhone: "",
+      email: "",
+      address: ""
+    });
   };
 
   const handleExportCSV = () => {
-    const headers = ["Reg No", "Full Name", "Batch", "Status", "Mobile Phone", "Parent Phone", "Email", "Enrolment Date"];
-    const rows = filteredStudents.map((s) => [s.regNo, s.name, resolveBatchName(s), s.status, s.phone, s.parentPhone, s.email, s.enrolmentDate]);
+    const headers = ["Reg No", "Full Name", "Batch", "Stream", "Status", "Mobile Phone", "Parent Phone", "Email", "Enrolment Date"];
+    const rows = filteredStudents.map((s) => [s.regNo, s.name, resolveBatchName(s), s.stream || '', s.status, s.phone, s.parentPhone, s.email, s.enrolmentDate]);
     exportToCSV("PBA_Student_Database", headers, rows);
   };
 
@@ -467,8 +525,17 @@ export const StudentManagementView = ({ isMobile }) => {
         const email = row["Email"] || row["email"] || "";
         const rawBatch = row["Batch Name"] || row["Batch"] || row["batch"] || row["batchName"] || "";
 
+        // AUTO-DETECT stream: "stream", "academic stream", "course"
+        const stream = row["Stream"] || row["stream"] || row["Academic Stream"] || row["academic stream"] || row["Course"] || row["course"] || null;
+
+        // AUTO-DETECT subjects: "subjects", "subject", "courses taken" (split by comma or semicolon)
+        const rawSubj = row["Subjects (semicolon-separated e.g. Biology;Chemistry;Physics)"] || row["Subjects"] || row["subjects"] || row["subject"] || row["Subject"] || row["Courses Taken"] || row["courses taken"] || "";
+
+        const subjectsArr = rawSubj
+          ? (rawSubj.includes(';') ? rawSubj.split(';') : rawSubj.split(',')).map(s => s.trim()).filter(Boolean)
+          : [];
+
         const csvBatch = resolveBatchFromCSV(rawBatch, currentBatches, importForm);
-        const subjectsStr = row["Subjects (semicolon-separated e.g. Biology;Chemistry;Physics)"] || row["Subjects"] || row["subjects"] || "";
         const notes = row["Notes"] || row["notes"] || "";
 
         const missingRequired = !name.trim();
@@ -496,7 +563,9 @@ export const StudentManagementView = ({ isMobile }) => {
           branch,
           batchId: csvBatch.batchId,
           batchName: csvBatch.batchName || (currentBatches[0]?.name || "Default Batch"),
-          subjectsStr,
+          stream: stream ? stream.trim() : null,
+          subjectsArr,
+          subjectsStr: subjectsArr.join(', '),
           notes,
           status,
           statusMsg
@@ -538,9 +607,9 @@ export const StudentManagementView = ({ isMobile }) => {
         return;
       }
 
-      const subjectsArr = r.subjectsStr
-        ? r.subjectsStr.split(";").map((s) => s.trim()).filter(Boolean)
-        : ["Business Studies", "Accounting", "Economics"];
+      const subjectsArr = (r.subjectsArr && r.subjectsArr.length > 0)
+        ? r.subjectsArr
+        : (r.subjectsStr ? r.subjectsStr.split(',').map((s) => s.trim()).filter(Boolean) : []);
 
       const newId = "stu-" + Date.now() + Math.random().toString(36).substr(2, 4);
       const regNo = "PBA-2026-" + (newStudents.length + 101);
@@ -549,6 +618,8 @@ export const StudentManagementView = ({ isMobile }) => {
         id: newId,
         regNo,
         name: r.name,
+        stream: r.stream || null,
+        subjects: subjectsArr,
         dob: r.dob || "2006-01-01",
         gender: r.gender || "Other",
         nic: r.nic || "",
@@ -564,8 +635,7 @@ export const StudentManagementView = ({ isMobile }) => {
         enrolledAt: new Date().toISOString().split("T")[0],
         status: "Active",
         registeredBy: currentUser.name || "Admin",
-        importedVia: "csv",
-        subjects: subjectsArr
+        importedVia: "csv"
       };
 
       newStudents.push(newStu);
@@ -591,53 +661,14 @@ export const StudentManagementView = ({ isMobile }) => {
       studentSubjects: newStudentSubjects
     }));
 
-    // ── Save imported students into pba_students ──
+    // ── Save imported students into pba_students (Single source of truth) ──
     const existingProfiles = safeLS('pba_students', []);
     const updatedProfiles = [...importedStudentsList, ...(existingProfiles || [])];
     saveLS('pba_students', updatedProfiles);
 
-    // ── FIX 1: Sync imported students into pba_batches ──
-    const _importedWithBatch = (importedStudentsList || []).filter(s =>
-      s.batchId || s.batch || s.batchEnrolled
-    );
-
-    if (_importedWithBatch.length > 0) {
-      const _allBatches = safeLS('pba_batches', []);
-      const _updatedBatches = (_allBatches || []).map(batch => {
-        const studentsForThisBatch = _importedWithBatch.filter(s =>
-          (s.batchId || s.batch || s.batchEnrolled) === batch.id ||
-          (s.batchName || s.batchEnrolled) === batch.name
-        );
-        if (studentsForThisBatch.length === 0) return batch;
-
-        const existingStudents = batch.students || [];
-        const existingIds = new Set(
-          existingStudents.map(e => e.id || e.regNo || e.studentId)
-        );
-
-        const newEntries = studentsForThisBatch
-          .filter(s => {
-            const sid = s.id || s.regNo || s.studentId;
-            return sid && !existingIds.has(sid);
-          })
-          .map(s => ({
-            id:          s.id          || s.regNo || s.studentId || '',
-            regNo:       s.regNo       || s.id    || '',
-            name:        s.name        || s.studentName || '',
-            mobilePhone: s.mobilePhone || s.phone || '',
-            parentPhone: s.parentPhone || '',
-            status:      s.status      || 'active',
-            enrolledAt:  new Date().toISOString()
-          }));
-
-        if (newEntries.length === 0) return batch;
-        return { ...batch, students: [...existingStudents, ...newEntries] };
-      });
-      saveLS('pba_batches', _updatedBatches);
-      setBatches(_updatedBatches);
-    }
-    // ── End sync ──
-
+    // PART D: Sync imported students into pba_batches
+    syncStudentsToBatches();
+    setBatches(safeLS('pba_batches', []));
     setStudents(buildStudentList());
 
     setImportLog({ successCount, errorCount, errors });
@@ -947,6 +978,7 @@ export const StudentManagementView = ({ isMobile }) => {
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Reg No</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Student Name</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Batch</th>
+                  <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>STREAM</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Mobile Phone</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Parent Phone</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Status</th>
@@ -965,13 +997,39 @@ export const StudentManagementView = ({ isMobile }) => {
                       {st.regNo}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', fontWeight: 600, color: theme.textPrimary, borderBottom: '1px solid #F4F5F7' }}>
-                      {st.name}
+                      <div>{st.name}</div>
+                      {(st.subjects || []).length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+                          {(st.subjects || []).map(subj => (
+                            <span key={subj} style={{
+                              background: '#F0FDF4', color: '#166534',
+                              border: '1px solid #BBF7D0',
+                              borderRadius: '6px', padding: '2px 8px', fontSize: '11px'
+                            }}>
+                              {subj}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
                       {(st.batches || []).length > 0
                         ? (st.batches || []).join(', ')
                         : <span style={{ color: '#9CA3AF' }}>—</span>
                       }
+                    </td>
+                    <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
+                      {st.stream ? (
+                        <span style={{
+                          background: '#EFF6FF', color: '#1D4ED8',
+                          borderRadius: '6px', padding: '2px 8px',
+                          fontSize: '12px', fontWeight: 600
+                        }}>
+                          {st.stream}
+                        </span>
+                      ) : (
+                        <span style={{ color: '#9CA3AF', fontSize: '12px' }}>—</span>
+                      )}
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
                       {st.mobilePhone || st.phone || ''}
@@ -1190,6 +1248,89 @@ export const StudentManagementView = ({ isMobile }) => {
                   </p>
                 )}
               </div>
+
+              {/* Stream */}
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{
+                  display: 'block', fontSize: '11px', fontWeight: 600,
+                  color: '#6B7280', letterSpacing: '0.05em', marginBottom: '6px'
+                }}>
+                  STREAM
+                </label>
+                <select
+                  value={studentForm.stream || ''}
+                  onChange={e => setStudentForm(prev => ({
+                    ...prev,
+                    stream: e.target.value || null,
+                    subjects: []   // clear subjects when stream changes
+                  }))}
+                  style={{
+                    width: '100%', padding: '10px 12px',
+                    border: '1px solid #D1D5DB', borderRadius: '8px',
+                    fontSize: '14px', color: '#111827', background: '#fff',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="">— Select Stream —</option>
+                  {streamOptions.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Subjects */}
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{
+                  display: 'block', fontSize: '11px', fontWeight: 600,
+                  color: '#6B7280', letterSpacing: '0.05em', marginBottom: '6px'
+                }}>
+                  SUBJECTS
+                  <span style={{ fontWeight: 400, marginLeft: '6px', color: '#9CA3AF' }}>
+                    (select all that apply)
+                  </span>
+                </label>
+                <div style={{
+                  display: 'flex', flexWrap: 'wrap', gap: '8px',
+                  padding: '10px 12px',
+                  border: '1px solid #D1D5DB', borderRadius: '8px',
+                  background: '#F9FAFB', minHeight: '44px',
+                  boxSizing: 'border-box'
+                }}>
+                  {subjectOptions.map(subj => {
+                    const checked = (studentForm.subjects || []).includes(subj);
+                    return (
+                      <label key={subj} style={{
+                        display: 'flex', alignItems: 'center', gap: '5px',
+                        fontSize: '13px', color: checked ? '#1D4ED8' : '#374151',
+                        cursor: 'pointer',
+                        background: checked ? '#EFF6FF' : '#fff',
+                        border: `1px solid ${checked ? '#BFDBFE' : '#E5E7EB'}`,
+                        borderRadius: '6px', padding: '4px 10px',
+                        userSelect: 'none'
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setStudentForm(prev => {
+                              const current = prev.subjects || [];
+                              return {
+                                ...prev,
+                                subjects: checked
+                                  ? current.filter(s => s !== subj)
+                                  : [...current, subj]
+                              };
+                            });
+                          }}
+                          style={{ display: 'none' }}
+                        />
+                        {checked ? '✓ ' : ''}{subj}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div style={{ marginBottom: "16px" }}>
                 <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#4A5568", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "5px" }}>Mobile Number</label>
                 <input
@@ -1329,6 +1470,7 @@ export const StudentManagementView = ({ isMobile }) => {
                               <th style={{ padding: '8px 12px', textAlign: 'left', color: '#718096' }}>DOB</th>
                               <th style={{ padding: '8px 12px', textAlign: 'left', color: '#718096' }}>Branch</th>
                               <th style={{ padding: '8px 12px', textAlign: 'left', color: '#718096' }}>Batch</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'left', color: '#718096' }}>Stream</th>
                               <th style={{ padding: '8px 12px', textAlign: 'left', color: '#718096' }}>Subjects</th>
                               <th style={{ padding: '8px 12px', textAlign: 'left', color: '#718096' }}>Status</th>
                             </tr>
@@ -1341,6 +1483,7 @@ export const StudentManagementView = ({ isMobile }) => {
                                 <td style={{ padding: '8px 12px', color: '#4A5568' }}>{r.dob || "—"}</td>
                                 <td style={{ padding: '8px 12px', color: '#4A5568' }}>{r.branch}</td>
                                 <td style={{ padding: '8px 12px', color: '#4A5568' }}>{r.batchName}</td>
+                                <td style={{ padding: '8px 12px', color: '#4A5568' }}>{r.stream || "—"}</td>
                                 <td style={{ padding: '8px 12px', color: '#718096' }}>{r.subjectsStr || "Default"}</td>
                                 <td style={{ padding: '8px 12px' }}>
                                   {r.status === "ready" && (
