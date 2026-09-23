@@ -42,15 +42,30 @@ const getEventColor = (type) => {
   return EVENT_COLORS[norm] || EVENT_COLORS[type] || EVENT_COLORS.default;
 };
 
+const getTodayStr = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+const parseLocalDate = (dateStr) => {
+  if (!dateStr) return new Date();
+  const parts = String(dateStr).split('-');
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10) - 1;
+  const d = parseInt(parts[2], 10);
+  return new Date(y, m, d);
+};
+
 export const CalendarView = () => {
   const { data, addCalendarEvent, deleteCalendarEvent, filterByBranch } = useApp();
 
   // Bug 1 Fix: Default to current month and current year
   const [currentDate, setCurrentDate] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    d.setHours(0, 0, 0, 0);
-    return d;
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedDayEvents, setSelectedDayEvents] = useState(null);
@@ -79,7 +94,7 @@ export const CalendarView = () => {
   // New Event Form State
   const [formData, setFormData] = useState({
     title: "",
-    date: new Date().toISOString().split("T")[0],
+    date: getTodayStr(),
     type: "exam",
     branch: "All",
     notes: ""
@@ -100,7 +115,8 @@ export const CalendarView = () => {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 = Sun
+  const firstDay = new Date(year, month, 1).getDay(); // 0 = Sun
+  const firstDayOfMonth = firstDay;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const monthNames = [
@@ -108,7 +124,7 @@ export const CalendarView = () => {
     "July", "August", "September", "October", "November", "December"
   ];
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = getTodayStr();
 
   // Helper to get events for a date string YYYY-MM-DD
   const getEventsForDay = (dayNum) => {
@@ -135,7 +151,7 @@ export const CalendarView = () => {
     setShowAddModal(false);
     setFormData({
       title: "",
-      date: new Date().toISOString().split("T")[0],
+      date: getTodayStr(),
       type: "exam",
       branch: "All",
       notes: ""
@@ -162,13 +178,14 @@ export const CalendarView = () => {
   // Upcoming 30 days events list
   const upcomingEvents = [...(eventsList || [])]
     .filter((e) => {
-      const eDate = new Date(e.date + 'T12:00:00');
+      if (!e.date) return false;
+      const eDate = parseLocalDate(e.date);
       const now = new Date();
       now.setHours(0, 0, 0, 0);
       const diffDays = Math.ceil((eDate - now) / (1000 * 60 * 60 * 24));
       return diffDays >= 0 && diffDays <= 30;
     })
-    .sort((a, b) => new Date(a.date) - new Date(b.date));
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
@@ -322,7 +339,10 @@ export const CalendarView = () => {
             {Array.from({ length: daysInMonth }).map((_, i) => {
               const dayNum = i + 1;
               const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
-              const isToday = dateStr === todayStr;
+              const today = new Date();
+              const isToday = dayNum === today.getDate() &&
+                              month === today.getMonth() &&
+                              year === today.getFullYear();
               const dayEvs = getEventsForDay(dayNum);
               const cellDate = new Date(year, month, dayNum);
               const isWeekend = [0, 6].includes(cellDate.getDay());
@@ -484,7 +504,8 @@ export const CalendarView = () => {
               upcomingEvents.map((ev) => {
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
-                const evDate = new Date(ev.date + 'T12:00:00');
+                const evDate = parseLocalDate(ev.date);
+                evDate.setHours(0, 0, 0, 0);
                 const daysUntil = Math.ceil((evDate - today) / 86400000);
                 const c = getEventColor(ev.type);
 
@@ -531,7 +552,7 @@ export const CalendarView = () => {
 
                     {/* Date */}
                     <div style={{ fontSize: '11px', color: c.text + 'CC' }}>
-                      {new Date(ev.date + 'T12:00:00').toLocaleDateString('en-GB', {
+                      {parseLocalDate(ev.date).toLocaleDateString('en-GB', {
                         weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'
                       })}
                     </div>
