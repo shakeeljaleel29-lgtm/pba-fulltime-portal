@@ -541,6 +541,112 @@ export const GeneralAdminView = ({ isMobile }) => {
   const [allocationDate, setAllocationDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [selectedClassroomForSchedule, setSelectedClassroomForSchedule] = useState("All");
 
+  const tomorrowDateString = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  };
+
+  const offsetDate = (dateStr, days) => {
+    const d = new Date(dateStr);
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split('T')[0];
+  };
+
+  const getDayName = (dateStr) => {
+    return new Date(dateStr).toLocaleDateString('en-US', { weekday: 'long' });
+  };
+
+  const [dailyAllocationDate, setDailyAllocationDate] = useState(() => tomorrowDateString());
+  const [, setRoomOverrideTick] = useState(0);
+
+  const handleRoomOverride = (sessionId, newRoomId) => {
+    const classroomsList = safeLS('pba_classrooms', classrooms || []);
+    const room = (classroomsList || []).find(r => r.id === newRoomId);
+    const existing = safeLS('pba_room_overrides', []);
+
+    // Remove old override for this session+date, then add new one
+    const filtered = (existing || []).filter(
+      o => !(o.sessionId === sessionId && o.date === dailyAllocationDate)
+    );
+    if (newRoomId) {
+      filtered.push({
+        sessionId,
+        date: dailyAllocationDate,
+        classroomId: newRoomId,
+        classroomName: room?.name || ''
+      });
+    }
+    saveLS('pba_room_overrides', filtered);
+    setRoomOverrideTick(n => n + 1);
+  };
+
+  const getSessionsForDate = (dateStr) => {
+    const dayName = getDayName(dateStr); // e.g. "Thursday"
+    const pbaSess = safeLS('pba_sessions', null);
+    const allSessions = (Array.isArray(pbaSess) && pbaSess.length > 0)
+      ? pbaSess
+      : safeLS('pba_timetable_sessions', safeLS('pba_timetable', []));
+    const overrides = safeLS('pba_room_overrides', []);
+    const classroomsList = safeLS('pba_classrooms', classrooms || []);
+    const batchesList = safeLS('pba_batches', batches || []);
+    const lecturersList = safeLS('pba_lecturers', lecturers || []);
+
+    return (allSessions || [])
+      .filter(s => {
+        if (s.recurrence === 'one_time') {
+          return s.startDate === dateStr || s.date === dateStr;
+        }
+        if (s.day && s.day !== dayName && s.date !== dateStr) return false;
+        // Respect start/end date if set
+        if (s.startDate && dateStr < s.startDate) return false;
+        if (s.endDate && dateStr > s.endDate) return false;
+        return true;
+      })
+      .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''))
+      .map(session => {
+        const override = (overrides || []).find(
+          o => o.sessionId === session.id && o.date === dateStr
+        );
+        const batch = (batchesList || []).find(b => b.id === session.batchId);
+        const lecturer = (lecturersList || []).find(l => l.id === session.lecturerId);
+        const defaultRoom = (classroomsList || []).find(c => c.id === session.classroomId);
+        return {
+          ...session,
+          batchName: batch?.name || session.batchName || '—',
+          lecturerName: lecturer?.name || session.lecturerName || '—',
+          currentRoomId: override?.classroomId || session.classroomId || '',
+          currentRoomName: override?.classroomName || defaultRoom?.name || session.classroomName || '—',
+          hasOverride: !!override
+        };
+      });
+  };
+
+  const generateWhatsAppMessage = (sessionsList) => {
+    const [y, m, d] = dailyAllocationDate.split('-').map(Number);
+    const dateLabel = new Date(y, m - 1, d).toLocaleDateString('en-GB', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+    });
+    const lines = [
+      `📅 *PBA Full-Time Portal — Class Schedule*`,
+      `📆 *${dateLabel}*`,
+      ``
+    ];
+    const targetSessions = sessionsList || getSessionsForDate(dailyAllocationDate);
+    targetSessions.forEach(session => {
+      lines.push(
+        `🕐 *${session.startTime} – ${session.endTime}*` +
+        ` | ${session.subject || 'Session'}` +
+        ` | ${session.batchName}` +
+        ` | ${session.lecturerName}` +
+        ` | 🏫 ${session.currentRoomName}`
+      );
+    });
+    lines.push(``);
+    lines.push(`_Sent from PBA Full-Time Portal_`);
+    return lines.join('\n');
+  };
+
   const getAllocDate = (offset) => {
     const d = new Date();
     d.setDate(d.getDate() + offset);
@@ -1112,6 +1218,26 @@ export const GeneralAdminView = ({ isMobile }) => {
           }}
         >
           <CalendarCheck size={16} /> Visual Timetable Builder
+        </button>
+
+        <button
+          onClick={() => setActiveTab("dailyAllocation")}
+          style={{
+            padding: "8px 18px",
+            borderRadius: "7px",
+            fontSize: "13px",
+            fontWeight: activeTab === "dailyAllocation" ? 600 : 500,
+            color: activeTab === "dailyAllocation" ? theme.accent : theme.textSecondary,
+            border: "none",
+            background: activeTab === "dailyAllocation" ? "#FFFFFF" : "transparent",
+            cursor: "pointer",
+            boxShadow: activeTab === "dailyAllocation" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px"
+          }}
+        >
+          📋 Daily Allocation
         </button>
 
         <button
@@ -2825,6 +2951,196 @@ export const GeneralAdminView = ({ isMobile }) => {
       {activeTab === "builder" && (
         <VisualTimetableBuilder initialClassroomId={selectedClassroomForSchedule} onOpenBatchManager={() => setActiveTab("batches")} />
       )}
+
+      {/* TAB: DAILY ROOM ALLOCATION */}
+      {activeTab === "dailyAllocation" && (() => {
+        const sessionsForDay = getSessionsForDate(dailyAllocationDate);
+        const classroomsList = safeLS('pba_classrooms', classrooms || []);
+
+        return (
+          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: "12px", padding: "24px" }}>
+            {/* Header row */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
+              <div>
+                <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827', margin: 0 }}>
+                  Daily Classroom Allocation
+                </h2>
+                <p style={{ fontSize: '13px', color: '#6B7280', margin: '4px 0 0' }}>
+                  Assign classrooms for each session, then share with lecturers via WhatsApp.
+                </p>
+              </div>
+
+              {/* Date picker */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setDailyAllocationDate(offsetDate(dailyAllocationDate, -1))}
+                  style={{ padding: '6px 12px', border: '1px solid #D1D5DB', borderRadius: '6px', background: '#fff', cursor: 'pointer', fontSize: '16px' }}
+                >
+                  ‹
+                </button>
+                <input
+                  type="date"
+                  value={dailyAllocationDate}
+                  onChange={e => setDailyAllocationDate(e.target.value)}
+                  style={{ padding: '8px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', fontWeight: 600, color: '#111827', cursor: 'pointer' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setDailyAllocationDate(offsetDate(dailyAllocationDate, 1))}
+                  style={{ padding: '6px 12px', border: '1px solid #D1D5DB', borderRadius: '6px', background: '#fff', cursor: 'pointer', fontSize: '16px' }}
+                >
+                  ›
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDailyAllocationDate(tomorrowDateString())}
+                  style={{ padding: '7px 14px', border: '1px solid #D1D5DB', borderRadius: '6px', background: '#F9FAFB', cursor: 'pointer', fontSize: '12px', fontWeight: 600, color: '#374151' }}
+                >
+                  Tomorrow
+                </button>
+              </div>
+            </div>
+
+            {/* Session list */}
+            {sessionsForDay.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9CA3AF' }}>
+                <div style={{ fontSize: '32px', marginBottom: '8px' }}>📭</div>
+                <p style={{ fontSize: '14px', margin: 0 }}>
+                  No sessions scheduled for {getDayName(dailyAllocationDate)}.
+                </p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {sessionsForDay.map(session => (
+                  <div key={session.id} style={{
+                    display: 'grid',
+                    gridTemplateColumns: isMobileState ? '1fr' : '100px 1fr 1fr 1fr 220px',
+                    alignItems: 'center',
+                    gap: '12px',
+                    background: '#ffffff',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    padding: '14px 18px'
+                  }}>
+                    {/* Time */}
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: '#111827' }}>
+                        {session.startTime}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#9CA3AF' }}>
+                        to {session.endTime}
+                      </div>
+                    </div>
+
+                    {/* Batch + Subject */}
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
+                        {session.batchName}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#6B7280' }}>
+                        {session.subject || '—'}
+                      </div>
+                    </div>
+
+                    {/* Lecturer */}
+                    <div style={{ fontSize: '13px', color: '#374151' }}>
+                      {session.lecturerName}
+                    </div>
+
+                    {/* Current room (with override indicator) */}
+                    <div>
+                      <div style={{ fontSize: '13px', color: '#374151', fontWeight: 500 }}>
+                        {session.currentRoomName}
+                      </div>
+                      {session.hasOverride && (
+                        <div style={{ fontSize: '11px', color: '#7C3AED', fontWeight: 600 }}>
+                          ✎ overridden for this day
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Classroom selector */}
+                    <div>
+                      <select
+                        value={session.currentRoomId}
+                        onChange={e => handleRoomOverride(session.id, e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          border: '1px solid #D1D5DB',
+                          borderRadius: '8px',
+                          fontSize: '13px',
+                          background: '#fff',
+                          cursor: 'pointer',
+                          color: '#111827'
+                        }}
+                      >
+                        <option value="">— Select Room —</option>
+                        {(classroomsList || []).map(room => (
+                          <option key={room.id} value={room.id}>
+                            {room.name}
+                            {room.capacity ? ` (Cap: ${room.capacity})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Bottom buttons: Copy to Clipboard and Share via WhatsApp */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(generateWhatsAppMessage(sessionsForDay));
+                  triggerToast('📋 Schedule copied to clipboard!');
+                }}
+                disabled={sessionsForDay.length === 0}
+                style={{
+                  padding: '10px 20px',
+                  border: '1px solid #D1D5DB',
+                  borderRadius: '8px',
+                  background: '#ffffff',
+                  cursor: sessionsForDay.length > 0 ? 'pointer' : 'not-allowed',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: '#374151'
+                }}
+              >
+                📋 Copy Schedule
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const msg = generateWhatsAppMessage(sessionsForDay);
+                  window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+                }}
+                disabled={sessionsForDay.length === 0}
+                style={{
+                  padding: '10px 24px',
+                  border: 'none',
+                  borderRadius: '8px',
+                  background: sessionsForDay.length > 0 ? '#25D366' : '#D1D5DB',
+                  cursor: sessionsForDay.length > 0 ? 'pointer' : 'not-allowed',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <span style={{ fontSize: '18px' }}>💬</span>
+                Share on WhatsApp
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* TAB 4: TODAY'S CLASS CHANGES & ATTENDANCE */}
       {activeTab === "schedule" && (
