@@ -281,6 +281,7 @@ const LecturerManagementViewInner = ({ isMobile }) => {
     employmentType: "",
     subjectIds: [],
     subjects: [],
+    batchIds: [],
     qualification: "",
     phone: "",
     email: "",
@@ -324,6 +325,7 @@ const LecturerManagementViewInner = ({ isMobile }) => {
       employmentType: "",
       subjectIds: [],
       subjects: [],
+      batchIds: [],
       qualification: "",
       phone: "",
       email: "",
@@ -347,6 +349,7 @@ const LecturerManagementViewInner = ({ isMobile }) => {
       employmentType: lecturer.employmentType || "",
       subjectIds: lecturer.subjectIds || [],
       subjects: lecturer.subjects || [],
+      batchIds: lecturer.batchIds || [],
       qualification: lecturer.qualification || "",
       phone: lecturer.phone || "",
       email: lecturer.email || "",
@@ -386,6 +389,7 @@ const LecturerManagementViewInner = ({ isMobile }) => {
       employmentType: lecForm.employmentType || "Full-time",
       subjectIds: lecForm.subjectIds || [],
       subjects: lecForm.subjects || [],
+      batchIds: lecForm.batchIds || [],
       qualification: lecForm.qualification || "",
       phone: lecForm.phone || "",
       email: lecForm.email || "",
@@ -411,8 +415,14 @@ const LecturerManagementViewInner = ({ isMobile }) => {
         ? existingUsers.map((u) => (u.id === targetId ? { ...u, ...newLec } : u))
         : [newLec, ...existingUsers];
       localStorage.setItem("pba_users", JSON.stringify(updatedUsers));
+
+      const existingLecs = safeLS("pba_lecturers", []);
+      const updatedLecs = existingLecs.some((u) => u.id === targetId)
+        ? existingLecs.map((u) => (u.id === targetId ? { ...u, ...newLec } : u))
+        : [newLec, ...existingLecs];
+      localStorage.setItem("pba_lecturers", JSON.stringify(updatedLecs));
     } catch (err) {
-      console.error("Error writing to pba_users:", err);
+      console.error("Error writing to pba_users/pba_lecturers:", err);
     }
 
     setLecForm({
@@ -421,6 +431,7 @@ const LecturerManagementViewInner = ({ isMobile }) => {
       employmentType: "",
       subjectIds: [],
       subjects: [],
+      batchIds: [],
       qualification: "",
       phone: "",
       email: "",
@@ -2357,6 +2368,72 @@ const LecturerManagementViewInner = ({ isMobile }) => {
                   </div>
                 )}
               </div>
+
+              {/* ── BATCHES TAUGHT ── */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: '#6B7280',
+                  letterSpacing: '0.05em',
+                  marginBottom: '8px'
+                }}>
+                  BATCHES TAUGHT
+                </label>
+                <div style={{
+                  border: '1px solid #E5E7EB',
+                  borderRadius: '8px',
+                  padding: '10px',
+                  maxHeight: '180px',
+                  overflowY: 'auto',
+                  background: '#FAFBFC'
+                }}>
+                  {(safeLS('pba_batches', []) || []).length === 0
+                    ? <p style={{ color: '#9CA3AF', fontSize: '13px', margin: 0 }}>
+                        No batches created yet.
+                      </p>
+                    : (safeLS('pba_batches', []) || []).map(batch => (
+                        <label key={batch.id} style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '6px 4px',
+                          cursor: 'pointer'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <input
+                              type="checkbox"
+                              checked={(lecForm.batchIds || []).includes(batch.id)}
+                              onChange={e => {
+                                const updated = e.target.checked
+                                  ? [...(lecForm.batchIds || []), batch.id]
+                                  : (lecForm.batchIds || []).filter(id => id !== batch.id);
+                                setLecForm(prev => ({ ...prev, batchIds: updated }));
+                              }}
+                              style={{ accentColor: '#2B6CB0' }}
+                            />
+                            <span style={{ fontSize: '13px', color: '#111827', fontWeight: 500 }}>
+                              {batch.name}
+                            </span>
+                          </div>
+                          {batch.branch && (
+                            <span style={{
+                              fontSize: '11px',
+                              color: '#6B7280',
+                              background: '#F3F4F6',
+                              padding: '2px 8px',
+                              borderRadius: '999px'
+                            }}>
+                              {batch.branch}
+                            </span>
+                          )}
+                        </label>
+                      ))
+                  }
+                </div>
+              </div>
+              {/* ── End BATCHES TAUGHT ── */}
 
               {/* ASSIGN ASSISTANT(S) */}
               <div style={{ marginBottom: '16px' }}>

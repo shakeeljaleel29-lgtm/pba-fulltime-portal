@@ -650,7 +650,14 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
   const modalSelectedBatch = (batches || []).find((b) => b.id === sessionForm.batchId);
   const modalBatchSubjects = modalSelectedBatch?.subjects || modalSelectedBatch?.batchSubjects || [];
 
-  const modalAvailableLecturers = (allLecturers || []).filter((l) =>
+  const batchFilteredLecturers = sessionForm.batchId
+    ? (allLecturers || []).filter(l =>
+        !(l.batchIds || []).length ||
+        (l.batchIds || []).includes(sessionForm.batchId)
+      )
+    : (allLecturers || []);
+
+  const modalAvailableLecturers = batchFilteredLecturers.filter((l) =>
     (l.subjects || []).includes(sessionForm.subjectId) ||
     (l.subjectIds || []).includes(sessionForm.subjectId) ||
     modalBatchSubjects.some((bs) =>
@@ -661,7 +668,7 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
 
   const modalLecturerOptions = modalAvailableLecturers.length > 0
     ? modalAvailableLecturers
-    : (allLecturers || []);
+    : batchFilteredLecturers;
 
   const getLecturerLabel = (lecturer, selectedDay) => {
     if (!lecturer) return "";
@@ -1348,9 +1355,32 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
 
       {/* ADD / EDIT SESSION MODAL */}
       {showModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "580px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
-            <div style={{ padding: "18px 24px", borderBottom: "1px solid #E3E6EA", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '12px',
+            padding: '28px 32px',
+            width: '560px',
+            maxWidth: '90vw',
+            maxHeight: '85vh',
+            overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)',
+            position: 'relative'
+          }}>
+            <div style={{ padding: "0 0 16px 0", borderBottom: "1px solid #E3E6EA", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>
                 {editingSession ? "Edit Session" : "Schedule a Session"}
               </h3>
@@ -1359,7 +1389,7 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
               </button>
             </div>
 
-            <form onSubmit={handleSaveSession} style={{ padding: "20px 24px" }}>
+            <form onSubmit={handleSaveSession} style={{ padding: "20px 0 0 0" }}>
               {currentClashes.hardBlock && (
                 <div style={{ background: "#FFF5F5", border: "1px solid #FEB2B2", borderRadius: "8px", padding: "10px 14px", marginBottom: "16px", display: "flex", gap: "10px", alignItems: "flex-start" }}>
                   <AlertTriangle size={18} color="#C53030" style={{ flexShrink: 0, marginTop: "2px" }} />
@@ -1754,8 +1784,31 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
 
       {/* MODAL: PRINT OPTIONS MODAL */}
       {showPrintModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,28,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: isMobileState ? "flex-start" : "center", justifyContent: "center", padding: isMobileState ? "20px 12px" : "0", overflowY: "auto" }}>
-          <div style={{ background: "#FFFFFF", borderRadius: "12px", width: isMobileState ? "95vw" : "480px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", margin: isMobileState ? "20px auto" : "auto", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '12px',
+            padding: '24px',
+            width: '480px',
+            maxWidth: '90vw',
+            maxHeight: '85vh',
+            overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)',
+            position: 'relative'
+          }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1A202C" }}>Print / Export Timetable</h3>
               <button onClick={() => setShowPrintModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A0AEC0" }}>
