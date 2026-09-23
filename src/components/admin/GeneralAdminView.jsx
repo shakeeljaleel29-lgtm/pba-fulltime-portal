@@ -266,6 +266,34 @@ const DEFAULT_BATCHES = [
 
 const COLOR_PALETTE = ["#2B6CB0", "#276749", "#B7860A", "#6B46C1", "#C53030", "#2C7A7B"];
 
+export const getAdminCalendarEventColor = (type, fallbackColor) => {
+  const norm = String(type || '').toLowerCase().replace(/[\s-_]+/g, ' ').trim();
+  switch (norm) {
+    case 'term start':
+      return '#10B981';
+    case 'term end':
+      return '#3B82F6';
+    case 'holiday':
+      return '#EF4444';
+    case 'exam week':
+      return '#F59E0B';
+    case 'exam':
+      return '#EAB308';
+    case 'leave':
+      return '#F43F5E';
+    case 'payment due':
+    case 'payment':
+      return '#059669';
+    case 'event':
+      return '#8B5CF6';
+    case 'revision':
+    case 'class':
+      return '#06B6D4';
+    default:
+      return fallbackColor || '#6B7280';
+  }
+};
+
 export const GeneralAdminView = ({ isMobile }) => {
   const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
   const { data, addAnnouncement, currentUser, filterByBranch } = useApp();
@@ -391,10 +419,26 @@ export const GeneralAdminView = ({ isMobile }) => {
   const [enrollSearchQuery, setEnrollSearchQuery] = useState("");
 
   // Monthly Calendar State
-  const [calendarDate, setCalendarDate] = useState(() => new Date());
-  const [calendarEvents, setCalendarEvents] = useState(() => safeLS("pba_academic_calendar", []));
+  // Bug 1 Fix: Default to current month and year
+  const [calendarDate, setCalendarDate] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+  // Bug 2 Fix: Unified pba_calendar_events key with migration
+  const [calendarEvents, setCalendarEvents] = useState(() => {
+    const primary = safeLS("pba_calendar_events", []);
+    if (primary && primary.length > 0) return primary;
+    const legacy = safeLS("pba_academic_calendar", []);
+    if (legacy && legacy.length > 0) {
+      saveLS("pba_calendar_events", legacy);
+      return legacy;
+    }
+    return [];
+  });
   const [showEventModal, setShowEventModal] = useState(false);
-  const [eventForm, setEventForm] = useState({ date: "", title: "", type: "event", notes: "", color: "#6B46C1" });
+  const [eventForm, setEventForm] = useState({ date: "", title: "", type: "event", notes: "", color: "#8B5CF6" });
   const [editingEvent, setEditingEvent] = useState(null);
 
   // Today's Class Changes & Timetable & Attendance State
@@ -435,8 +479,24 @@ export const GeneralAdminView = ({ isMobile }) => {
 
   // Sync states to LS
   useEffect(() => {
-    saveLS("pba_academic_calendar", calendarEvents);
+    saveLS("pba_calendar_events", calendarEvents);
   }, [calendarEvents]);
+
+  useEffect(() => {
+    if (activeTab === "calendar") {
+      const latest = safeLS("pba_calendar_events", []);
+      setCalendarEvents(latest);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const updated = safeLS("pba_calendar_events", []);
+      setCalendarEvents(updated);
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
 
   useEffect(() => {
     saveLS("pba_attendance", attendanceRecords);
@@ -4508,7 +4568,7 @@ export const GeneralAdminView = ({ isMobile }) => {
               <button
                 type="button"
                 onClick={() => {
-                  setEventForm({ date: new Date().toISOString().slice(0, 10), title: "", type: "event", notes: "", color: "#6B46C1" });
+                  setEventForm({ date: new Date().toISOString().slice(0, 10), title: "", type: "event", notes: "", color: getAdminCalendarEventColor("event") });
                   setEditingEvent(null);
                   setShowEventModal(true);
                 }}
@@ -4522,11 +4582,15 @@ export const GeneralAdminView = ({ isMobile }) => {
           {/* Legend Row */}
           <div style={{ display: "flex", gap: "14px", marginBottom: "16px", flexWrap: "wrap", padding: "10px 14px", background: "#F8FAFC", borderRadius: "8px", border: "1px solid #EDF2F7" }}>
             {[
-              { type: "term_start", label: "Term Start", color: "#276749" },
-              { type: "term_end", label: "Term End", color: "#2B6CB0" },
-              { type: "holiday", label: "Holiday", color: "#E53E3E" },
-              { type: "exam_week", label: "Exam Week", color: "#B7860A" },
-              { type: "event", label: "Event", color: "#6B46C1" }
+              { type: "term_start", label: "Term Start", color: "#10B981" },
+              { type: "term_end", label: "Term End", color: "#3B82F6" },
+              { type: "holiday", label: "Holiday", color: "#EF4444" },
+              { type: "exam_week", label: "Exam Week", color: "#F59E0B" },
+              { type: "exam", label: "Exam", color: "#EAB308" },
+              { type: "leave", label: "Leave", color: "#F43F5E" },
+              { type: "payment", label: "Payment Due", color: "#059669" },
+              { type: "event", label: "Event", color: "#8B5CF6" },
+              { type: "revision", label: "Revision", color: "#06B6D4" }
             ].map(t => (
               <div key={t.type} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#4A5568" }}>
                 <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: t.color, display: "inline-block" }} />
@@ -4562,7 +4626,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                     <div
                       key={idx}
                       onClick={() => {
-                        setEventForm({ date: dateStr, title: "", type: "event", notes: "", color: "#6B46C1" });
+                        setEventForm({ date: dateStr, title: "", type: "event", notes: "", color: getAdminCalendarEventColor("event") });
                         setEditingEvent(null);
                         setShowEventModal(true);
                       }}
@@ -4582,33 +4646,47 @@ export const GeneralAdminView = ({ isMobile }) => {
                         {day}
                       </div>
                       <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "2px" }}>
-                        {dayEvents.map(ev => (
-                          <div
-                            key={ev.id}
-                            onClick={e => {
-                              e.stopPropagation();
-                              setEventForm(ev);
-                              setEditingEvent(ev);
-                              setShowEventModal(true);
-                            }}
-                            style={{
-                              fontSize: "10px",
-                              fontWeight: 600,
-                              padding: "2px 5px",
-                              background: (ev.color || "#6B46C1") + "22",
-                              color: ev.color || "#6B46C1",
-                              borderLeft: `3px solid ${ev.color || "#6B46C1"}`,
-                              borderRadius: "3px",
-                              cursor: "pointer",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis"
-                            }}
-                            title={`${ev.title}${ev.notes ? " - " + ev.notes : ""}`}
-                          >
-                            {ev.title}
-                          </div>
-                        ))}
+                        {dayEvents.map(ev => {
+                          const evColor = getAdminCalendarEventColor(ev.type, ev.color);
+                          const evTitle = ev.title || ev.name || ev.label || '—';
+                          const evDesc = ev.notes || ev.description || '';
+                          return (
+                            <div
+                              key={ev.id}
+                              onClick={e => {
+                                e.stopPropagation();
+                                setEventForm({
+                                  ...ev,
+                                  title: evTitle,
+                                  type: ev.type || 'event',
+                                  color: evColor,
+                                  notes: evDesc
+                                });
+                                setEditingEvent(ev);
+                                setShowEventModal(true);
+                              }}
+                              style={{
+                                fontSize: "10px",
+                                fontWeight: 600,
+                                padding: "2px 5px",
+                                background: evColor + "22",
+                                color: evColor,
+                                borderLeft: `3px solid ${evColor}`,
+                                borderRadius: "3px",
+                                cursor: "pointer",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                minWidth: 0,
+                                width: "100%",
+                                boxSizing: "border-box"
+                              }}
+                              title={`${evTitle}${evDesc ? " - " + evDesc : ""}`}
+                            >
+                              {evTitle}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -5040,15 +5118,17 @@ export const GeneralAdminView = ({ isMobile }) => {
             <form
               onSubmit={e => {
                 e.preventDefault();
-                if (!eventForm.title.trim()) return;
+                const evTitle = (eventForm.title || '').trim();
+                if (!evTitle) return;
+                const evColor = getAdminCalendarEventColor(eventForm.type, eventForm.color);
                 if (editingEvent) {
-                  const updated = (calendarEvents || []).map(ev => ev.id === editingEvent.id ? { ...eventForm, id: editingEvent.id } : ev);
-                  saveLS("pba_academic_calendar", updated);
+                  const updated = (calendarEvents || []).map(ev => ev.id === editingEvent.id ? { ...ev, ...eventForm, title: evTitle, color: evColor, id: editingEvent.id } : ev);
+                  saveLS("pba_calendar_events", updated);
                   setCalendarEvents(updated);
                 } else {
-                  const newEv = { ...eventForm, id: Date.now().toString() };
+                  const newEv = { ...eventForm, title: evTitle, color: evColor, id: "cal-" + Date.now() };
                   const updated = [...(calendarEvents || []), newEv];
-                  saveLS("pba_academic_calendar", updated);
+                  saveLS("pba_calendar_events", updated);
                   setCalendarEvents(updated);
                 }
                 setShowEventModal(false);
@@ -5084,22 +5164,20 @@ export const GeneralAdminView = ({ isMobile }) => {
                   value={eventForm.type}
                   onChange={e => {
                     const val = e.target.value;
-                    const colorMap = {
-                      term_start: "#276749",
-                      term_end: "#2B6CB0",
-                      holiday: "#E53E3E",
-                      exam_week: "#B7860A",
-                      event: "#6B46C1"
-                    };
-                    setEventForm({ ...eventForm, type: val, color: colorMap[val] || "#6B46C1" });
+                    const c = getAdminCalendarEventColor(val);
+                    setEventForm({ ...eventForm, type: val, color: c });
                   }}
                   style={{ width: "100%", padding: "8px 12px", border: "1px solid #E3E6EA", borderRadius: "8px", fontSize: "13px", background: "#FFF", boxSizing: "border-box" }}
                 >
-                  <option value="term_start">Term Start (#276749 Green)</option>
-                  <option value="term_end">Term End (#2B6CB0 Blue)</option>
-                  <option value="holiday">Holiday (#E53E3E Red)</option>
-                  <option value="exam_week">Exam Week (#B7860A Amber)</option>
-                  <option value="event">Event (#6B46C1 Purple)</option>
+                  <option value="term_start">Term Start (Green)</option>
+                  <option value="term_end">Term End (Blue)</option>
+                  <option value="holiday">Holiday (Red)</option>
+                  <option value="exam_week">Exam Week (Amber)</option>
+                  <option value="exam">Exam (Yellow)</option>
+                  <option value="leave">Leave (Rose)</option>
+                  <option value="payment">Payment Due (Emerald)</option>
+                  <option value="event">Event (Purple)</option>
+                  <option value="revision">Revision (Cyan)</option>
                 </select>
               </div>
 
@@ -5120,7 +5198,7 @@ export const GeneralAdminView = ({ isMobile }) => {
                     type="button"
                     onClick={() => {
                       const updated = (calendarEvents || []).filter(ev => ev.id !== editingEvent.id);
-                      saveLS("pba_academic_calendar", updated);
+                      saveLS("pba_calendar_events", updated);
                       setCalendarEvents(updated);
                       setShowEventModal(false);
                       triggerToast("✓ Academic event deleted");

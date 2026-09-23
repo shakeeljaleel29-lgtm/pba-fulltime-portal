@@ -1,7 +1,26 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useApp } from "../../context/AppContext";
 import { ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, Trash2, X } from "lucide-react";
 import { T } from "../../theme";
+
+const safeLS = (key, fallback = []) => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(fallback)
+      ? (Array.isArray(parsed) ? parsed : fallback)
+      : (parsed ?? fallback);
+  } catch {
+    return fallback;
+  }
+};
+
+const saveLS = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+};
 
 const EVENT_COLORS = {
   term_start:   { bg: '#D1FAE5', border: '#059669', text: '#065F46', dot: '#059669', label: 'Term Start'   },
@@ -11,19 +30,51 @@ const EVENT_COLORS = {
   exam:         { bg: '#FEF3C7', border: '#D97706', text: '#92400E', dot: '#D97706', label: 'Exam'         },
   leave:        { bg: '#FFE4E6', border: '#F43F5E', text: '#9F1239', dot: '#F43F5E', label: 'Leave'        },
   payment:      { bg: '#ECFDF5', border: '#10B981', text: '#065F46', dot: '#10B981', label: 'Payment Due'  },
+  payment_due:  { bg: '#ECFDF5', border: '#10B981', text: '#065F46', dot: '#10B981', label: 'Payment Due'  },
   event:        { bg: '#EDE9FE', border: '#7C3AED', text: '#4C1D95', dot: '#7C3AED', label: 'Event'        },
   revision:     { bg: '#F0F9FF', border: '#0EA5E9', text: '#0C4A6E', dot: '#0EA5E9', label: 'Revision'     },
+  class:        { bg: '#F0F9FF', border: '#0EA5E9', text: '#0C4A6E', dot: '#0EA5E9', label: 'Revision'     },
   default:      { bg: '#F1F5F9', border: '#94A3B8', text: '#475569', dot: '#94A3B8', label: 'Other'        }
 };
 
-const getEventColor = (type) => EVENT_COLORS[type] || EVENT_COLORS.default;
+const getEventColor = (type) => {
+  const norm = String(type || '').toLowerCase().replace(/[\s-_]+/g, '_');
+  return EVENT_COLORS[norm] || EVENT_COLORS[type] || EVENT_COLORS.default;
+};
 
 export const CalendarView = () => {
   const { data, addCalendarEvent, deleteCalendarEvent, filterByBranch } = useApp();
 
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 9, 1)); // October 2026
+  // Bug 1 Fix: Default to current month and current year
+  const [currentDate, setCurrentDate] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedDayEvents, setSelectedDayEvents] = useState(null);
+
+  // Bug 2 Fix: Sync with unified pba_calendar_events
+  const [calendarEvents, setCalendarEvents] = useState(() => {
+    const fromLS = safeLS('pba_calendar_events', null);
+    if (Array.isArray(fromLS) && fromLS.length > 0) return fromLS;
+    if (Array.isArray(data?.calendarEvents) && data.calendarEvents.length > 0) {
+      saveLS('pba_calendar_events', data.calendarEvents);
+      return data.calendarEvents;
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    const syncFromLS = () => {
+      const fromLS = safeLS('pba_calendar_events', data?.calendarEvents || []);
+      setCalendarEvents(fromLS);
+    };
+    syncFromLS();
+    window.addEventListener('storage', syncFromLS);
+    return () => window.removeEventListener('storage', syncFromLS);
+  }, [data?.calendarEvents]);
 
   // New Event Form State
   const [formData, setFormData] = useState({
@@ -34,7 +85,7 @@ export const CalendarView = () => {
     notes: ""
   });
 
-  const eventsList = filterByBranch(data?.calendarEvents || [], "branch");
+  const eventsList = filterByBranch(calendarEvents || [], "branch");
 
   // Month navigation
   const prevMonth = () => {
@@ -69,7 +120,18 @@ export const CalendarView = () => {
   const handleAddSubmit = (e) => {
     e.preventDefault();
     if (!formData.title.trim()) return;
-    addCalendarEvent(formData);
+    const newEv = {
+      id: "cal-" + Date.now(),
+      branch: formData.branch || "All",
+      ...formData
+    };
+    const current = safeLS('pba_calendar_events', calendarEvents || []);
+    const updated = [newEv, ...(current || [])];
+    saveLS('pba_calendar_events', updated);
+    setCalendarEvents(updated);
+    if (addCalendarEvent) {
+      addCalendarEvent(formData);
+    }
     setShowAddModal(false);
     setFormData({
       title: "",
@@ -78,6 +140,23 @@ export const CalendarView = () => {
       branch: "All",
       notes: ""
     });
+  };
+
+  // Handle Delete Event
+  const handleDeleteEvent = (eventId) => {
+    const current = safeLS('pba_calendar_events', calendarEvents || []);
+    const updated = (current || []).filter(e => e.id !== eventId);
+    saveLS('pba_calendar_events', updated);
+    setCalendarEvents(updated);
+    if (deleteCalendarEvent) {
+      deleteCalendarEvent(eventId);
+    }
+    if (selectedDayEvents) {
+      setSelectedDayEvents(prev => prev ? {
+        ...prev,
+        events: (prev.events || []).filter(e => e.id !== eventId)
+      } : null);
+    }
   };
 
   // Upcoming 30 days events list
@@ -356,7 +435,7 @@ export const CalendarView = () => {
                             textOverflow: 'ellipsis',
                             maxWidth: '100%'
                           }}>
-                            {ev.title}
+                            {ev.title || ev.name || ev.label || '—'}
                           </span>
                         </div>
                       );
@@ -447,7 +526,7 @@ export const CalendarView = () => {
 
                     {/* Event title */}
                     <div style={{ fontSize: '13px', fontWeight: 700, color: c.text, marginBottom: '3px' }}>
-                      {ev.title}
+                      {ev.title || ev.name || ev.label || '—'}
                     </div>
 
                     {/* Date */}
@@ -458,13 +537,13 @@ export const CalendarView = () => {
                     </div>
 
                     {/* Notes if present */}
-                    {ev.notes && (
+                    {(ev.notes || ev.description) && (
                       <div style={{
                         fontSize: '11px', color: c.text + 'AA',
                         marginTop: '4px',
                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
                       }}>
-                        {ev.notes}
+                        {ev.notes || ev.description}
                       </div>
                     )}
                   </div>
@@ -718,14 +797,13 @@ export const CalendarView = () => {
                       <span style={{ background: "white", color: c.text, border: `1px solid ${c.border}60`, fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "10px" }}>
                         {c.label}
                       </span>
-                      <div style={{ fontWeight: 700, color: c.text, marginTop: "6px", fontSize: '14px' }}>{ev.title}</div>
-                      {ev.notes && <div style={{ fontSize: "12px", color: c.text + 'CC', marginTop: "4px" }}>{ev.notes}</div>}
+                      <div style={{ fontWeight: 700, color: c.text, marginTop: "6px", fontSize: '14px' }}>{ev.title || ev.name || ev.label || '—'}</div>
+                      {(ev.notes || ev.description) && <div style={{ fontSize: "12px", color: c.text + 'CC', marginTop: "4px" }}>{ev.notes || ev.description}</div>}
                     </div>
 
                     <button
                       onClick={() => {
-                        deleteCalendarEvent(ev.id);
-                        setSelectedDayEvents(null);
+                        handleDeleteEvent(ev.id);
                       }}
                       style={{
                         padding: '6px 12px', background: 'white', color: '#EF4444',
