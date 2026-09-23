@@ -22,24 +22,114 @@ const saveLS = (key, value) => {
   } catch {}
 };
 
-const EVENT_COLORS = {
-  term_start:   { bg: '#D1FAE5', border: '#059669', text: '#065F46', dot: '#059669', label: 'Term Start'   },
-  term_end:     { bg: '#DBEAFE', border: '#2563EB', text: '#1E40AF', dot: '#2563EB', label: 'Term End'     },
-  holiday:      { bg: '#FEE2E2', border: '#DC2626', text: '#991B1B', dot: '#DC2626', label: 'Holiday'      },
-  exam_week:    { bg: '#FEF3C7', border: '#D97706', text: '#92400E', dot: '#D97706', label: 'Exam Week'    },
-  exam:         { bg: '#FEF3C7', border: '#D97706', text: '#92400E', dot: '#D97706', label: 'Exam'         },
-  leave:        { bg: '#FFE4E6', border: '#F43F5E', text: '#9F1239', dot: '#F43F5E', label: 'Leave'        },
-  payment:      { bg: '#ECFDF5', border: '#10B981', text: '#065F46', dot: '#10B981', label: 'Payment Due'  },
-  payment_due:  { bg: '#ECFDF5', border: '#10B981', text: '#065F46', dot: '#10B981', label: 'Payment Due'  },
-  event:        { bg: '#EDE9FE', border: '#7C3AED', text: '#4C1D95', dot: '#7C3AED', label: 'Event'        },
-  revision:     { bg: '#F0F9FF', border: '#0EA5E9', text: '#0C4A6E', dot: '#0EA5E9', label: 'Revision'     },
-  class:        { bg: '#F0F9FF', border: '#0EA5E9', text: '#0C4A6E', dot: '#0EA5E9', label: 'Revision'     },
-  default:      { bg: '#F1F5F9', border: '#94A3B8', text: '#475569', dot: '#94A3B8', label: 'Other'        }
+const EVENT_TYPE_CONFIG = {
+  'term_start':   { label: 'Term Start',   color: '#22C55E', bg: '#D1FAE5', border: '#059669', text: '#065F46', dot: '#22C55E' },
+  'term_end':     { label: 'Term End',      color: '#3B82F6', bg: '#DBEAFE', border: '#2563EB', text: '#1E40AF', dot: '#3B82F6' },
+  'holiday':      { label: 'Holiday',       color: '#EF4444', bg: '#FEE2E2', border: '#DC2626', text: '#991B1B', dot: '#EF4444' },
+  'exam_week':    { label: 'Exam Week',     color: '#F97316', bg: '#FEF3C7', border: '#D97706', text: '#92400E', dot: '#F97316' },
+  'exam':         { label: 'Exam',          color: '#EAB308', bg: '#FEF9C3', border: '#CA8A04', text: '#854D0E', dot: '#EAB308' },
+  'leave':        { label: 'Leave',         color: '#EC4899', bg: '#FCE7F3', border: '#DB2777', text: '#9D174D', dot: '#EC4899' },
+  'payment_due':  { label: 'Payment Due',   color: '#F59E0B', bg: '#FEF3C7', border: '#D97706', text: '#92400E', dot: '#F59E0B' },
+  'event':        { label: 'Event',         color: '#8B5CF6', bg: '#EDE9FE', border: '#7C3AED', text: '#4C1D95', dot: '#8B5CF6' },
+  'revision':     { label: 'Revision',      color: '#06B6D4', bg: '#CFFAFE', border: '#0891B2', text: '#155E75', dot: '#06B6D4' },
+  // Aliases
+  'fee_due':      { label: 'Payment Due',   color: '#F59E0B', bg: '#FEF3C7', border: '#D97706', text: '#92400E', dot: '#F59E0B' },
+  'payment':      { label: 'Payment Due',   color: '#F59E0B', bg: '#FEF3C7', border: '#D97706', text: '#92400E', dot: '#F59E0B' },
+  'Payment Due':  { label: 'Payment Due',   color: '#F59E0B', bg: '#FEF3C7', border: '#D97706', text: '#92400E', dot: '#F59E0B' },
+  'Revision':     { label: 'Revision',      color: '#06B6D4', bg: '#CFFAFE', border: '#0891B2', text: '#155E75', dot: '#06B6D4' },
+  'class':        { label: 'Revision',      color: '#06B6D4', bg: '#CFFAFE', border: '#0891B2', text: '#155E75', dot: '#06B6D4' },
 };
 
-const getEventColor = (type) => {
-  const norm = String(type || '').toLowerCase().replace(/[\s-_]+/g, '_');
-  return EVENT_COLORS[norm] || EVENT_COLORS[type] || EVENT_COLORS.default;
+const normaliseType = (raw) => {
+  const t = (raw || '').toLowerCase().trim().replace(/[\s_-]+/g, '_');
+  const aliases = {
+    'fee_due':        'payment_due',
+    'payment_due':    'payment_due',
+    'payment':        'payment_due',
+    'paymentdue':     'payment_due',
+    'revision_class': 'revision',
+    'exam_week':      'exam_week',
+    'examweek':       'exam_week',
+    'term_start':     'term_start',
+    'term_end':       'term_end',
+    'class':          'revision',
+  };
+  return aliases[t] || t;
+};
+
+const getEventColor = (rawOrObj) => {
+  const rawType = typeof rawOrObj === 'object' && rawOrObj !== null
+    ? (rawOrObj.type || rawOrObj.eventType || '')
+    : rawOrObj;
+  const type = normaliseType(rawType);
+  const cfg = EVENT_TYPE_CONFIG[type] || EVENT_TYPE_CONFIG[rawType] || {};
+  return {
+    bg:     cfg.bg     || '#F1F5F9',
+    border: cfg.border || '#94A3B8',
+    text:   cfg.text   || '#475569',
+    dot:    cfg.dot    || cfg.color || '#94A3B8',
+    color:  cfg.color  || cfg.dot   || '#94A3B8',
+    label:  cfg.label  || rawType   || 'Event'
+  };
+};
+
+const buildAllCalendarEvents = () => {
+  // SOURCE 1: manually created calendar events
+  const manualEvents = (safeLS('pba_calendar_events', []) || []).map(e => ({
+    ...e,
+    _source: e._source || 'manual'
+  }));
+
+  // SOURCE 2: exams from pba_exams and pba_exam_schedule → map to calendar event shape
+  const rawExams = [
+    ...(safeLS('pba_exams', []) || []),
+    ...(safeLS('pba_exam_schedule', []) || [])
+  ];
+  const seenExamIds = new Set();
+  const examEvents = rawExams.filter(exam => {
+    const id = exam.id || exam.examId;
+    if (id && seenExamIds.has(id)) return false;
+    if (id) seenExamIds.add(id);
+    return true;
+  }).map(exam => ({
+    id:        'exam-' + (exam.id || exam.examId || Math.random()),
+    title:     exam.name || exam.title || exam.examName || 'Exam',
+    date:      exam.date || exam.examDate || null,
+    type:      'exam',
+    subject:   exam.subject || exam.subjectName || '',
+    batchName: exam.batchName || exam.batch || '',
+    time:      exam.startTime
+                ? `${exam.startTime}${exam.endTime ? '–' + exam.endTime : ''}`
+                : '',
+    room:      exam.roomName || exam.room || '',
+    branch:    exam.branch || 'All',
+    _source:   'pba_exams'
+  })).filter(e => e.date);
+
+  // SOURCE 3: fee due dates from pba_fees or pba_fee_schedule
+  const feeEvents = [
+    ...(safeLS('pba_fees', []) || []),
+    ...(safeLS('pba_fee_schedule', []) || [])
+  ]
+  .filter(f => f && (f.dueDate || f.date))
+  .map(f => ({
+    id:       'fee-' + (f.id || Math.random()),
+    title:    f.title || f.description || f.feeName || 'Fee Due',
+    date:     f.dueDate || f.date,
+    type:     'payment_due',
+    branch:   f.branch || 'All',
+    _source:  'pba_fees'
+  }));
+
+  // Merge, deduplicate by id or title+date
+  const seen = new Set();
+  return [...manualEvents, ...examEvents, ...feeEvents].filter(e => {
+    if (!e.date) return false;
+    const key = e.id || (e.title + '|' + e.date);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 };
 
 const getTodayStr = () => {
@@ -91,7 +181,6 @@ export const CalendarView = () => {
     return () => window.removeEventListener('storage', syncFromLS);
   }, [data?.calendarEvents]);
 
-  // New Event Form State
   const [formData, setFormData] = useState({
     title: "",
     date: getTodayStr(),
@@ -100,7 +189,44 @@ export const CalendarView = () => {
     notes: ""
   });
 
-  const eventsList = filterByBranch(calendarEvents || [], "branch");
+  const [calRefresh, setCalRefresh] = useState(0);
+
+  const allEvents = React.useMemo(() => {
+    return buildAllCalendarEvents();
+  }, [calRefresh, calendarEvents]);
+
+  // Build legend entries, dedup by DISPLAY LABEL (not by type key):
+  const legendEntries = React.useMemo(() => {
+    const seenLabels = new Set();
+    const entries = [];
+
+    // 1. Add canonical types in display order:
+    const orderedKeys = [
+      'term_start','term_end','holiday','exam_week',
+      'exam','leave','payment_due','event','revision'
+    ];
+    orderedKeys.forEach(key => {
+      const cfg = EVENT_TYPE_CONFIG[key];
+      if (cfg && !seenLabels.has(cfg.label)) {
+        seenLabels.add(cfg.label);
+        entries.push({ label: cfg.label, color: cfg.color });
+      }
+    });
+
+    // 2. Add any extra types found in live events that aren't covered:
+    allEvents.forEach(e => {
+      const type  = (e.type || e.eventType || '').toLowerCase().trim();
+      const cfg   = EVENT_TYPE_CONFIG[type] || EVENT_TYPE_CONFIG[e.type];
+      const label = cfg?.label || e.type || type;
+      const color = cfg?.color || cfg?.dot || '#6B7280';
+      if (label && !seenLabels.has(label)) {
+        seenLabels.add(label);
+        entries.push({ label, color });
+      }
+    });
+
+    return entries;
+  }, [allEvents]);
 
   // Month navigation
   const prevMonth = () => {
@@ -129,7 +255,7 @@ export const CalendarView = () => {
   // Helper to get events for a date string YYYY-MM-DD
   const getEventsForDay = (dayNum) => {
     const dStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
-    return (eventsList || []).filter((e) => e.date === dStr);
+    return (allEvents || []).filter((e) => e.date === dStr);
   };
 
   // Handle Add Form submit
@@ -145,6 +271,7 @@ export const CalendarView = () => {
     const updated = [newEv, ...(current || [])];
     saveLS('pba_calendar_events', updated);
     setCalendarEvents(updated);
+    setCalRefresh(n => n + 1);
     if (addCalendarEvent) {
       addCalendarEvent(formData);
     }
@@ -164,6 +291,23 @@ export const CalendarView = () => {
     const updated = (current || []).filter(e => e.id !== eventId);
     saveLS('pba_calendar_events', updated);
     setCalendarEvents(updated);
+
+    if (String(eventId).startsWith('exam-')) {
+      const realId = String(eventId).replace(/^exam-/, '');
+      const ex1 = safeLS('pba_exams', []);
+      saveLS('pba_exams', ex1.filter(x => String(x.id || x.examId) !== realId));
+      const ex2 = safeLS('pba_exam_schedule', []);
+      saveLS('pba_exam_schedule', ex2.filter(x => String(x.id || x.examId) !== realId));
+    } else if (String(eventId).startsWith('fee-')) {
+      const realId = String(eventId).replace(/^fee-/, '');
+      const f1 = safeLS('pba_fees', []);
+      saveLS('pba_fees', f1.filter(x => String(x.id) !== realId));
+      const f2 = safeLS('pba_fee_schedule', []);
+      saveLS('pba_fee_schedule', f2.filter(x => String(x.id) !== realId));
+    }
+
+    setCalRefresh(n => n + 1);
+
     if (deleteCalendarEvent) {
       deleteCalendarEvent(eventId);
     }
@@ -176,16 +320,10 @@ export const CalendarView = () => {
   };
 
   // Upcoming 30 days events list
-  const upcomingEvents = [...(eventsList || [])]
-    .filter((e) => {
-      if (!e.date) return false;
-      const eDate = parseLocalDate(e.date);
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-      const diffDays = Math.ceil((eDate - now) / (1000 * 60 * 60 * 24));
-      return diffDays >= 0 && diffDays <= 30;
-    })
-    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const upcomingEvents = (allEvents || [])
+    .filter((e) => (e.date || '') >= todayStr)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+    .slice(0, 10);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
@@ -264,7 +402,7 @@ export const CalendarView = () => {
                 {monthNames[month]} {year}
               </div>
               <div style={{ fontSize: '11px', opacity: 0.8, marginTop: '2px' }}>
-                {(eventsList || []).filter(ev => ev.date?.startsWith(`${year}-${String(month + 1).padStart(2, '0')}`)).length} events this month
+                {(allEvents || []).filter(ev => (ev.date || '').startsWith(`${year}-${String(month + 1).padStart(2, '0')}`)).length} events this month
               </div>
             </div>
 
@@ -286,26 +424,22 @@ export const CalendarView = () => {
             </button>
           </div>
 
-          {/* FIX 1 — Legend Bar above the calendar grid */}
+          {/* Legend Bar above the calendar grid */}
           <div style={{
-            display: 'flex', flexWrap: 'wrap', gap: '10px',
-            padding: '8px 0', marginBottom: '12px'
+            display: 'flex', flexWrap: 'wrap', gap: '12px',
+            marginBottom: '16px', fontSize: '12px'
           }}>
-            {Object.entries(EVENT_COLORS)
-              .filter(([key]) => key !== 'default')
-              .map(([key, c]) => (
-                <div key={key} style={{
-                  display: 'flex', alignItems: 'center', gap: '5px',
-                  fontSize: '11px', color: c.text, fontWeight: 600
-                }}>
-                  <span style={{
-                    width: '10px', height: '10px', borderRadius: '50%',
-                    background: c.dot, display: 'inline-block', flexShrink: 0
-                  }} />
-                  {c.label}
-                </div>
-              ))
-            }
+            {legendEntries.map(entry => (
+              <span key={entry.label}
+                    style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{
+                  width: '8px', height: '8px', borderRadius: '50%',
+                  background: entry.color, display: 'inline-block',
+                  flexShrink: 0
+                }} />
+                {entry.label}
+              </span>
+            ))}
           </div>
 
           {/* FIX 2 — Days of Week Header */}
@@ -556,6 +690,13 @@ export const CalendarView = () => {
                         weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'
                       })}
                     </div>
+
+                    {/* Exam details if source is pba_exams */}
+                    {ev._source === 'pba_exams' && (ev.subject || ev.time || ev.room) && (
+                      <div style={{ fontSize: '11px', color: c.text + 'DD', marginTop: '2px', fontWeight: 600 }}>
+                        {[ev.subject, ev.time, ev.room].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
 
                     {/* Notes if present */}
                     {(ev.notes || ev.description) && (

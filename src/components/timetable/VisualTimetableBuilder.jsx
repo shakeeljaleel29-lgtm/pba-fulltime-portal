@@ -5,10 +5,31 @@ import {
   getStreams,
   getSessionTypes,
   getClassroomTypes,
-  getTimetableConfig,
-  BATCH_COLORS,
-  getLecturerSubjects
+  getTimetableConfig
 } from "../admin/GeneralAdminView";
+
+// ── Local colour palette for "All Batches" mode ──────────────────
+const BATCH_COLORS = [
+  { bg: '#EFF6FF', border: '#BFDBFE', text: '#1D4ED8', color: '#1D4ED8' }, // blue
+  { bg: '#FFF7ED', border: '#FED7AA', text: '#C2410C', color: '#C2410C' }, // orange
+  { bg: '#F0FDF4', border: '#BBF7D0', text: '#166534', color: '#166534' }, // green
+  { bg: '#FDF4FF', border: '#E9D5FF', text: '#7E22CE', color: '#7E22CE' }, // purple
+  { bg: '#FFFBEB', border: '#FDE68A', text: '#92400E', color: '#92400E' }, // amber
+  { bg: '#FFF1F2', border: '#FECDD3', text: '#BE123C', color: '#BE123C' }, // rose
+  { bg: '#F0FDFA', border: '#99F6E4', text: '#0F766E', color: '#0F766E' }, // teal
+  { bg: '#F8FAFC', border: '#CBD5E1', text: '#334155', color: '#334155' }, // slate
+  { bg: '#FFF5F5', border: '#FEB2B2', text: '#C53030', color: '#C53030' }, // red
+  { bg: '#FAFAF9', border: '#D6D3D1', text: '#44403C', color: '#44403C' }, // stone
+];
+
+// ── Normalize lecturer subjects (array or comma-string) ───────────
+const getLecturerSubjects = (lecturer) => {
+  if (!lecturer) return [];
+  const raw = lecturer.subjects || lecturer.subjectsTaught || [];
+  if (Array.isArray(raw)) return raw.map(s => (typeof s === 'string' ? s : (s?.name || '')).trim()).filter(Boolean);
+  if (typeof raw === 'string') return raw.split(',').map(s => s.trim()).filter(Boolean);
+  return [];
+};
 import {
   CalendarCheck,
   Plus,
@@ -291,23 +312,23 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
     return migrated;
   });
 
-  const [batches, setBatches] = useState(() => safeLS("pba_batches", []));
-  const [subjects, setSubjects] = useState(() => safeLS("pba_subjects", []));
+  const [batches, setBatches] = useState(() => (safeLS("pba_batches", []) || []));
+  const [subjects, setSubjects] = useState(() => (safeLS("pba_subjects", []) || []));
   const [classrooms, setClassrooms] = useState(() => {
     const loaded = safeLS("pba_classrooms", []);
     if (loaded && loaded.length > 0) return loaded;
     return DEFAULT_CLASSROOMS;
   });
-  const [pbaUsers, setPbaUsers] = useState(() => safeLS("pba_users", []));
+  const [pbaUsers, setPbaUsers] = useState(() => (safeLS("pba_users", []) || []));
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setBatches(safeLS("pba_batches", []));
-      setSubjects(safeLS("pba_subjects", []));
-      setClassrooms(safeLS("pba_classrooms", DEFAULT_CLASSROOMS));
-      setPbaUsers(safeLS("pba_users", []));
+      setBatches(safeLS("pba_batches", []) || []);
+      setSubjects(safeLS("pba_subjects", []) || []);
+      setClassrooms(safeLS("pba_classrooms", DEFAULT_CLASSROOMS) || DEFAULT_CLASSROOMS);
+      setPbaUsers(safeLS("pba_users", []) || []);
 
-      const raw = safeLS("pba_timetable_sessions", DEFAULT_SESSIONS);
+      const raw = safeLS("pba_timetable_sessions", DEFAULT_SESSIONS) || DEFAULT_SESSIONS;
       const migrated = (raw || []).map((s) => ({
         ...s,
         recurrence: s.recurrence || "weekly",
@@ -376,17 +397,63 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
   );
 
   // Year Plan state for Holiday Blackout
-  const [yearPlanEvents, setYearPlanEvents] = useState(() => safeLS("pba_year_plan", []));
+  const [yearPlanEvents, setYearPlanEvents] = useState(() => (safeLS("pba_year_plan", []) || []));
 
   // Deterministic batch color map (sorted by batch name)
-  const allBatches = (batches && batches.length > 0 ? batches : (safeLS('pba_batches', []) || []))
-    .slice()
-    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const allBatches = (batches && batches.length > 0 ? batches : (safeLS('pba_batches', []) || []));
 
   const batchColorMap = {};
-  allBatches.forEach((b, i) => {
-    batchColorMap[b.id] = BATCH_COLORS[i % BATCH_COLORS.length];
-  });
+  try {
+    const sorted = [...allBatches].sort((a, b) =>
+      (a?.name || '').localeCompare(b?.name || '')
+    );
+    sorted.forEach((b, i) => {
+      if (b?.id) batchColorMap[b.id] = BATCH_COLORS[i % BATCH_COLORS.length];
+    });
+  } catch (_) {
+    // leave batchColorMap empty — cells will use fallback color
+  }
+
+  const getSessionMismatch = (sess) => {
+    try {
+      if (!sess?.lecturerId || (!sess?.subject && !sess?.subjectName && !sess?.subjectId)) return false;
+      const lec = (allLecturers || []).find(l => l?.id === sess.lecturerId);
+      if (!lec) return false;
+      const qualSubjects = getLecturerSubjects(lec).map(s => (s || '').toLowerCase().trim());
+      const rawSub = (sess.subject || sess.subjectName || '').trim().toLowerCase();
+      const rawSubId = (sess.subjectId || '').trim().toLowerCase();
+      const isQual = qualSubjects.some(s => s && (s === rawSub || s === rawSubId)) ||
+                     ((lec.subjects || []).map(s => (typeof s === 'string' ? s : s?.id || '').toLowerCase())).includes(rawSubId) ||
+                     ((lec.subjectIds || []).map(s => (s || '').toLowerCase())).includes(rawSubId);
+      return !isQual;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const getSessionsForCell = (day, timeSlot) => {
+    try {
+      return (sessions || []).filter(sess =>
+        sess?.day === day && sess?.timeSlot === timeSlot
+      );
+    } catch (_) {
+      return [];
+    }
+  };
+
+  const groupByBatch = (sessionsList) => {
+    try {
+      const map = {};
+      (sessionsList || []).forEach(sess => {
+        const bid = sess?.batchId || 'unknown';
+        if (!map[bid]) map[bid] = [];
+        map[bid].push(sess);
+      });
+      return map;
+    } catch (_) {
+      return {};
+    }
+  };
 
   // Print / Export Modal State
   const [showPrintModal, setShowPrintModal] = useState(false);
@@ -1083,7 +1150,10 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
           borderRadius: '10px'
         }}>
           {allBatches.map(b => {
-            const col = batchColorMap[b.id] || BATCH_COLORS[0];
+            const rawCol = batchColorMap?.[b?.id] || BATCH_COLORS[0];
+            const col = typeof rawCol === 'object' && rawCol !== null
+              ? { bg: rawCol.bg || '#EFF6FF', border: rawCol.border || '#BFDBFE', text: rawCol.text || '#1D4ED8' }
+              : { bg: '#EFF6FF', border: '#BFDBFE', text: rawCol || '#1D4ED8' };
             return (
               <span key={b.id} style={{
                 display: 'inline-flex', alignItems: 'center', gap: '5px',
@@ -1109,9 +1179,12 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
       )}
 
       {/* WEEKLY GRID */}
-      <div
-        style={{
-          background: "#FFFFFF",
+      {(() => {
+        try {
+          return (
+            <div
+              style={{
+                background: "#FFFFFF",
           border: "1px solid #E3E6EA",
           borderRadius: "12px",
           overflowX: "auto",
@@ -1287,57 +1360,58 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                 const isAllBatchesMode = activeBatchId === "all";
 
                 // Check lecturer mismatch
-                const sessionLecturer = (allLecturers || []).find((u) => u.id === sess.lecturerId);
-                const sessionMismatch = (() => {
-                  if (!sessionLecturer || (!sess.subjectId && !sess.subjectName)) return false;
-                  const subName = (rawSubName && rawSubName !== '(No Subject)') ? rawSubName : (sess.subjectName || '');
-                  if (!subName || subName === '(No Subject)') return false;
-                  const qualSubjects = getLecturerSubjects(sessionLecturer).map((s) => s.toLowerCase());
-                  const isQual = qualSubjects.some((s) => s === subName.toLowerCase() || s === (sess.subjectId || '').toLowerCase()) ||
-                                 (sessionLecturer.subjects || []).includes(sess.subjectId) ||
-                                 (sessionLecturer.subjectIds || []).includes(sess.subjectId);
-                  return !isQual;
-                })();
+                const sessionLecturer = (allLecturers || []).find((u) => u?.id === sess?.lecturerId);
+                const sessionMismatch = getSessionMismatch(sess);
 
                 let widthStyle = `calc(${colWidthPct}% - 6px)`;
                 let leftStyle = `calc(80px + ${leftOffsetPct}% + 3px)`;
 
                 if (isAllBatchesMode) {
-                  const overlappingSess = daySessions.filter((s) =>
-                    timesOverlap(s.startTime, s.endTime, sess.startTime, sess.endTime)
-                  );
-                  const distinctBatchIds = Array.from(new Set(overlappingSess.map((s) => s.batchId || 'unknown')))
-                    .sort((a, b) => {
-                      const nameA = (allBatches.find((bat) => bat.id === a)?.name || a);
-                      const nameB = (allBatches.find((bat) => bat.id === b)?.name || b);
-                      return nameA.localeCompare(nameB);
-                    });
+                  try {
+                    const overlappingSess = (daySessions || []).filter((s) =>
+                      timesOverlap(s?.startTime, s?.endTime, sess?.startTime, sess?.endTime)
+                    );
+                    const distinctBatchIds = Array.from(new Set(overlappingSess.map((s) => s?.batchId || 'unknown')))
+                      .sort((a, b) => {
+                        const nameA = (allBatches.find((bat) => bat?.id === a)?.name || a || '');
+                        const nameB = (allBatches.find((bat) => bat?.id === b)?.name || b || '');
+                        return nameA.localeCompare(nameB);
+                      });
 
-                  const subColsCount = distinctBatchIds.length;
-                  const batchSubColIdx = Math.max(0, distinctBatchIds.indexOf(sess.batchId || 'unknown'));
-                  const sameBatchOverlapping = overlappingSess.filter((s) => (s.batchId || 'unknown') === (sess.batchId || 'unknown'));
-                  const sameBatchIdx = Math.max(0, sameBatchOverlapping.findIndex((s) => s.id === sess.id));
-                  const totalSlotsInBatch = Math.max(1, sameBatchOverlapping.length);
+                    const subColsCount = Math.max(1, distinctBatchIds.length);
+                    const batchSubColIdx = Math.max(0, distinctBatchIds.indexOf(sess?.batchId || 'unknown'));
+                    const sameBatchOverlapping = overlappingSess.filter((s) => (s?.batchId || 'unknown') === (sess?.batchId || 'unknown'));
+                    const sameBatchIdx = Math.max(0, sameBatchOverlapping.findIndex((s) => s?.id === sess?.id));
+                    const totalSlotsInBatch = Math.max(1, sameBatchOverlapping.length);
 
-                  const subColWidthPct = colWidthPct / subColsCount;
-                  const slotWidthPct = subColWidthPct / totalSlotsInBatch;
-                  const totalOffsetPct = leftOffsetPct + batchSubColIdx * subColWidthPct + sameBatchIdx * slotWidthPct;
+                    const subColWidthPct = colWidthPct / subColsCount;
+                    const slotWidthPct = subColWidthPct / totalSlotsInBatch;
+                    const totalOffsetPct = leftOffsetPct + batchSubColIdx * subColWidthPct + sameBatchIdx * slotWidthPct;
 
-                  widthStyle = `calc(${slotWidthPct}% - 4px)`;
-                  leftStyle = `calc(80px + ${totalOffsetPct}% + 2px)`;
+                    widthStyle = `calc(${slotWidthPct}% - 4px)`;
+                    leftStyle = `calc(80px + ${totalOffsetPct}% + 2px)`;
+                  } catch (_) {
+                    widthStyle = `calc(${colWidthPct}% - 6px)`;
+                    leftStyle = `calc(80px + ${leftOffsetPct}% + 3px)`;
+                  }
                 } else {
-                  if (isSplitStream) {
-                    const sortedPair = [sess, sameSlotSess[0]].sort((a, b) => a.id.localeCompare(b.id));
-                    const isFirst = sortedPair[0].id === sess.id;
-                    widthStyle = `calc(${colWidthPct / 2}% - 4px)`;
-                    leftStyle = isFirst
-                      ? `calc(80px + ${leftOffsetPct}% + 2px)`
-                      : `calc(80px + ${leftOffsetPct + colWidthPct / 2}% + 2px)`;
+                  if (isSplitStream && Array.isArray(sameSlotSess) && sameSlotSess.length > 0) {
+                    try {
+                      const sortedPair = [sess, sameSlotSess[0]].sort((a, b) => (a?.id || '').localeCompare(b?.id || ''));
+                      const isFirst = sortedPair[0]?.id === sess?.id;
+                      widthStyle = `calc(${colWidthPct / 2}% - 4px)`;
+                      leftStyle = isFirst
+                        ? `calc(80px + ${leftOffsetPct}% + 2px)`
+                        : `calc(80px + ${leftOffsetPct + colWidthPct / 2}% + 2px)`;
+                    } catch (_) {}
                   }
                 }
 
-                const isDimmed = !isAllBatchesMode && sess.batchId !== activeBatchId;
-                const col = batchColorMap[sess.batchId] || BATCH_COLORS[0];
+                const isDimmed = !isAllBatchesMode && sess?.batchId !== activeBatchId;
+                const rawCol = batchColorMap?.[sess?.batchId] || BATCH_COLORS[0];
+                const col = typeof rawCol === 'object' && rawCol !== null
+                  ? { bg: rawCol.bg || '#EFF6FF', border: rawCol.border || '#BFDBFE', text: rawCol.text || '#1D4ED8' }
+                  : { bg: '#EFF6FF', border: '#BFDBFE', text: rawCol || '#1D4ED8' };
 
                 if (isAllBatchesMode) {
                   return (
@@ -1575,7 +1649,7 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
                     )}
                     {heightPx > 80 && sess.assistantId && (
                       <div style={{ fontSize: '10px', color: '#B7860A', marginTop: '1px' }}>
-                        Asst: {allLecturers.find(u => u.id === sess.assistantId)?.name || '—'}
+                        Asst: {(allLecturers || []).find(u => u?.id === sess.assistantId)?.name || '—'}
                       </div>
                     )}
                   </div>
@@ -1585,6 +1659,36 @@ export const VisualTimetableBuilder = ({ initialClassroomId = "All", onOpenBatch
           </div>
         </div>
       </div>
+          );
+        } catch (err) {
+          return (
+            <div style={{
+              padding: '32px', textAlign: 'center',
+              background: '#FEF2F2', border: '1px solid #FECACA',
+              borderRadius: '12px', margin: '16px',
+              color: '#EF4444'
+            }}>
+              <div style={{ fontSize: '20px', marginBottom: '8px' }}>⚠️</div>
+              <div style={{ fontWeight: 600, marginBottom: '4px' }}>
+                Timetable could not render
+              </div>
+              <div style={{ fontSize: '13px', color: '#6B7280', marginBottom: '12px' }}>
+                {err?.message || 'Unknown error'}
+              </div>
+              <button
+                onClick={() => window.location.reload()}
+                style={{
+                  padding: '8px 16px', background: '#EF4444', color: '#fff',
+                  border: 'none', borderRadius: '8px', cursor: 'pointer',
+                  fontSize: '13px'
+                }}
+              >
+                Reload Page
+              </button>
+            </div>
+          );
+        }
+      })()}
 
       {/* ADD / EDIT SESSION MODAL */}
       {showModal && (
