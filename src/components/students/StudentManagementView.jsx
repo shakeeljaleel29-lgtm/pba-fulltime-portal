@@ -160,6 +160,8 @@ export const StudentManagementView = ({ isMobile }) => {
 
   // Batches state — for filter dropdown
   const [batches, setBatches] = useState(() => safeLS('pba_batches', []));
+  // Increment to force re-read of pba_batches after drawer batch changes
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Seed pba_streams if key does not exist
   useEffect(() => {
@@ -686,6 +688,12 @@ export const StudentManagementView = ({ isMobile }) => {
           onClose={() => {
             setSelectedStudentForDrawer(null);
             setDrawerInitialTab("overview");
+            // Rebuild student list so the table batch column reflects any
+            // enroll / remove actions done inside the drawer
+            const freshBatches = safeLS('pba_batches', []);
+            setBatches(freshBatches);
+            setStudents(buildStudentList());
+            setRefreshKey(k => k + 1);
           }}
         />
       )}

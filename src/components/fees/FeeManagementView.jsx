@@ -37,7 +37,8 @@ export const FeeManagementView = ({ isMobile }) => {
 
   // Reminder Modal State
   const [reminderModalFee, setReminderModalFee] = useState(null);
-  const [filterBatch, setFilterBatch] = useState("All");
+  const [selectedBatchId, setSelectedBatchId] = useState('');
+  const [ledgerRefresh, setLedgerRefresh] = useState(0);
   // ── Fee Structure CRUD ──────────────────────────────────────
   const [feeStructureModal, setFeeStructureModal] = useState(false);
   const [editingFeeStructure, setEditingFeeStructure] = useState(null);
@@ -45,8 +46,6 @@ export const FeeManagementView = ({ isMobile }) => {
     batchId: '', feeName: '', amount: '', frequency: 'Monthly', mandatory: true
   });
   const [fsRefresh, setFsRefresh] = useState(0);
-
-  const feeStructures = safeLS('pba_fee_structures', []);
 
   const openFeeStructureModal = (existing) => {
     if (existing) {
@@ -103,16 +102,103 @@ export const FeeManagementView = ({ isMobile }) => {
   // ────────────────────────────────────────────────────────────
 
 
-  const totalOutstanding = data.studentFees
-    .filter((f) => f.status !== "Paid")
-    .reduce((sum, f) => sum + (f.amountDue - (f.amountPaid || 0)), 0);
+  // ── DERIVED LEDGER ─────────────────────────────────────────────────
+  const allBatches    = safeLS('pba_batches',        []) || [];
+  const allStudents   = safeLS('pba_students',       []) || [];
+  const feeStructures = safeLS('pba_fee_structures', []) || [];
+  const storedLedger  = safeLS('pba_fee_ledger',     []) || [];
 
-  const filteredFees = data.studentFees.filter((f) => filterBatch === "All" || f.batch === filterBatch);
+  const getStudentDetails = (idStr) =>
+    allStudents.find(s =>
+      (s.id || s.regNo || s.studentId || '').toString() === idStr
+    ) || {};
+
+  const derivedLedger = [];
+  allBatches.forEach(batch => {
+    const feeStruct = feeStructures.find(fs => fs.batchId === batch.id);
+    if (!feeStruct) return;
+    (batch.students || []).forEach(batchStudent => {
+      const studentIdStr = (
+        batchStudent.id || batchStudent.regNo || batchStudent.studentId || ''
+      ).toString();
+      if (!studentIdStr) return;
+      const studentDetails = getStudentDetails(studentIdStr);
+      const studentName =
+        batchStudent.name ||
+        studentDetails.name ||
+        studentDetails.studentName ||
+        studentIdStr;
+      const existing = storedLedger.find(e =>
+        (e.studentId || '').toString() === studentIdStr &&
+        e.batchId === batch.id
+      );
+      if (existing) {
+        derivedLedger.push({ ...existing, studentName, batchName: batch.name || existing.batchName });
+      } else {
+        const today = new Date();
+        const dueDateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-10`;
+        derivedLedger.push({
+          id:          `${studentIdStr}_${batch.id}`,
+          studentId:   studentIdStr,
+          studentName,
+          batchId:     batch.id,
+          batchName:   batch.name || '',
+          description: feeStruct.feeName || 'Monthly Fee',
+          amountDue:   feeStruct.amount  || 0,
+          amount:      feeStruct.amount  || 0,
+          amountPaid:  0,
+          balance:     feeStruct.amount  || 0,
+          dueDate:     dueDateStr,
+          status:      'Unpaid',
+          isOverdue:   false,
+        });
+      }
+    });
+  });
+  const statusOrder = { Unpaid: 1, Partial: 1, Paid: 2 };
+  derivedLedger.sort((a, b) => {
+    if (a.isOverdue && !b.isOverdue) return -1;
+    if (!a.isOverdue && b.isOverdue) return 1;
+    return (statusOrder[a.status] || 2) - (statusOrder[b.status] || 2);
+  });
+
+  const displayedLedger = selectedBatchId
+    ? derivedLedger.filter(e => e.batchId === selectedBatchId)
+    : derivedLedger;
+
+  const totalOutstanding = derivedLedger
+    .filter(e => e.status !== 'Paid')
+    .reduce((sum, e) => sum + (e.balance || e.amountDue || 0), 0);
+
+  const totalCollections = derivedLedger
+    .reduce((sum, e) => sum + (e.amountPaid || 0), 0);
+
+  const activeFeeStructures = feeStructures.length;
+  // ────────────────────────────────────────────────────────────
+
+  // Record a payment and persist to pba_fee_ledger
+  const recordPayment = (entryId, paidAmount) => {
+    const amount = parseFloat(paidAmount) || 0;
+    const entry  = derivedLedger.find(e => e.id === entryId);
+    if (!entry) return;
+    const newPaid    = (entry.amountPaid || 0) + amount;
+    const total      = entry.amount || entry.amountDue || 0;
+    const newBalance = Math.max(0, total - newPaid);
+    const newStatus  = newBalance <= 0 ? 'Paid' : newPaid > 0 ? 'Partial' : 'Unpaid';
+    const updatedEntry = { ...entry, amountPaid: newPaid, balance: newBalance, status: newStatus, paidAt: new Date().toISOString() };
+    const current = safeLS('pba_fee_ledger', []) || [];
+    const idx = current.findIndex(e => e.id === entryId);
+    const updated = idx >= 0
+      ? current.map(e => e.id === entryId ? updatedEntry : e)
+      : [...current, updatedEntry];
+    saveLS('pba_fee_ledger', updated);
+    setLedgerRefresh(r => r + 1);
+  };
 
   const handleOpenPayment = (fee) => {
     setPaymentModalFee(fee);
     setPayForm({
-      amount: fee.amountDue - (fee.amountPaid || 0),
+      amount: (fee.amountDue || fee.amount || 0) - (fee.amountPaid || 0),
       date: new Date().toISOString().split("T")[0],
       method: "Bank Transfer",
       receiptNo: `REC-${Math.floor(10000 + Math.random() * 90000)}`
@@ -122,36 +208,34 @@ export const FeeManagementView = ({ isMobile }) => {
   const handleSavePayment = (e) => {
     e.preventDefault();
     if (!paymentModalFee || !payForm.amount) return;
-    recordFeePayment(paymentModalFee.id, payForm);
+    recordPayment(paymentModalFee.id, payForm.amount);
     setPaymentModalFee(null);
   };
 
   const handleExportCSV = () => {
-    const headers = ["Student Name", "Batch", "Fee Description", "Due Date", "Amount Due (LKR)", "Amount Paid (LKR)", "Balance (LKR)", "Status", "Receipt No"];
-    const rows = filteredFees.map((f) => [
+    const headers = ["Student Name", "Batch", "Fee Description", "Due Date", "Amount Due (LKR)", "Amount Paid (LKR)", "Balance (LKR)", "Status"];
+    const rows = displayedLedger.map((f) => [
       f.studentName,
-      f.batch,
+      f.batchName || f.batch || '',
       f.description,
       f.dueDate,
-      f.amountDue,
+      f.amountDue || f.amount || 0,
       f.amountPaid || 0,
-      f.amountDue - (f.amountPaid || 0),
+      f.balance ?? ((f.amountDue || f.amount || 0) - (f.amountPaid || 0)),
       f.status,
-      f.receiptNo || "-"
     ]);
     exportToCSV("PBA_Fee_Collection_Report", headers, rows);
   };
 
   const getReminderMsg = (fee) => {
-    const studentObj = (data.students || []).find((s) => s.id === fee.studentId || s.name === fee.studentName) || {};
+    const studentObj = (allStudents).find((s) => s.id === fee.studentId || s.name === fee.studentName) || {};
     const parentName = studentObj.parentPhone ? "Parent / Guardian" : "Parent";
-    const balance = fee.amountDue - (fee.amountPaid || 0);
-
-    return `Dear ${parentName},\n\nThis is a reminder from Platinum Business Academy.\n\nStudent: ${fee.studentName}\nOutstanding Amount: LKR ${balance.toLocaleString()}\nDue Date: ${fee.dueDate}\n\nPlease contact us to arrange payment.\n\nPBA Admin`;
+    const balance = fee.balance ?? ((fee.amountDue || fee.amount || 0) - (fee.amountPaid || 0));
+    return `Dear ${parentName},\n\nThis is a reminder from Platinum Business Academy.\n\nStudent: ${fee.studentName}\nBatch: ${fee.batchName || ''}\nOutstanding Amount: LKR ${balance.toLocaleString()}\nDue Date: ${fee.dueDate}\n\nPlease contact us to arrange payment.\n\nPBA Admin`;
   };
 
   const handleSendWhatsAppReminder = (fee) => {
-    const studentObj = (data.students || []).find((s) => s.id === fee.studentId || s.name === fee.studentName) || {};
+    const studentObj = (allStudents).find((s) => s.id === fee.studentId || s.name === fee.studentName) || {};
     const phone = (studentObj.parentPhone || studentObj.phone || "").replace(/\D/g, "");
     const msgText = encodeURIComponent(getReminderMsg(fee));
     const targetPhone = phone.length >= 9 ? `94${phone.slice(-9)}` : "94770000000";
@@ -211,7 +295,7 @@ export const FeeManagementView = ({ isMobile }) => {
             Total Fee Collections
           </div>
           <div style={{ fontFamily: t.fontHeading, fontSize: "28px", fontWeight: 800, color: theme.gold, marginTop: "4px" }}>
-            LKR 30,000
+            LKR {totalCollections.toLocaleString()}
           </div>
           <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>Collected this billing cycle</div>
         </div>
@@ -229,7 +313,7 @@ export const FeeManagementView = ({ isMobile }) => {
             Active Fee Structures
           </div>
           <div style={{ fontFamily: t.fontHeading, fontSize: "28px", fontWeight: 800, color: theme.accent, marginTop: "4px" }}>
-            {(safeLS('pba_fee_structures', []) || []).length}
+            {activeFeeStructures}
           </div>
           <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>Batch fee schedules</div>
         </div>
@@ -340,8 +424,8 @@ export const FeeManagementView = ({ isMobile }) => {
           <div style={{ padding: "16px 22px 0 22px", display: "flex", gap: "12px", alignItems: "center" }}>
             <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#4A5568', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Filter by Batch:</label>
             <select
-              value={filterBatch}
-              onChange={(e) => setFilterBatch(e.target.value)}
+              value={selectedBatchId}
+              onChange={(e) => setSelectedBatchId(e.target.value)}
               style={{
                 width: "220px",
                 padding: '9px 36px 9px 13px',
@@ -364,9 +448,9 @@ export const FeeManagementView = ({ isMobile }) => {
               onFocus={e => { e.target.style.borderColor = '#2B6CB0'; e.target.style.boxShadow = '0 0 0 3px rgba(43,108,176,0.12)'; }}
               onBlur={e => { e.target.style.borderColor = '#E3E6EA'; e.target.style.boxShadow = 'none'; }}
             >
-              <option value="All">All Batches</option>
-              {data.batches.map((b) => (
-                <option key={b.id} value={b.name}>
+              <option value=''>All Batches</option>
+              {allBatches.map((b) => (
+                <option key={b.id} value={b.id}>
                   {b.name}
                 </option>
               ))}
@@ -390,10 +474,17 @@ export const FeeManagementView = ({ isMobile }) => {
                 </tr>
               </thead>
               <tbody>
-                {filteredFees.map((fee) => {
-                  const balance = fee.amountDue - (fee.amountPaid || 0);
-                  const isOverdue30Days = fee.status === "Unpaid" && new Date(fee.dueDate) < new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-                  const studentObj = (data.students || []).find((s) => s.id === fee.studentId || s.name === fee.studentName) || {};
+                {displayedLedger.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '32px', color: '#9CA3AF', fontSize: '14px' }}>
+                      No ledger entries. Enroll students in batches that have fee structures to auto-generate entries.
+                    </td>
+                  </tr>
+                ) : displayedLedger.map((fee) => {
+                  const balance = fee.balance ?? ((fee.amountDue || fee.amount || 0) - (fee.amountPaid || 0));
+                  const amountDue = fee.amountDue || fee.amount || 0;
+                  const isOverdue30Days = fee.status !== 'Paid' && new Date(fee.dueDate) < new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+                  const studentObj = allStudents.find((s) => s.id === fee.studentId || s.name === fee.studentName) || {};
 
                   return (
                     <tr
@@ -418,7 +509,7 @@ export const FeeManagementView = ({ isMobile }) => {
                         )}
                       </td>
                       <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
-                        {fee.batch}
+                {fee.batchName || fee.batch || '—'}
                       </td>
                       <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
                         {fee.description}
@@ -427,7 +518,7 @@ export const FeeManagementView = ({ isMobile }) => {
                         {fee.dueDate}
                       </td>
                       <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textPrimary, borderBottom: '1px solid #F4F5F7' }}>
-                        LKR {fee.amountDue.toLocaleString()}
+                        LKR {amountDue.toLocaleString()}
                       </td>
                       <td style={{ padding: '13px 16px', fontSize: '13px', fontWeight: 700, color: theme.success, borderBottom: '1px solid #F4F5F7' }}>
                         LKR {(fee.amountPaid || 0).toLocaleString()}
