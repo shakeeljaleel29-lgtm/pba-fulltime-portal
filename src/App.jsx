@@ -13,6 +13,8 @@ import { CalendarView } from "./components/calendar/CalendarView";
 import { LecturerManagementView } from "./components/lecturers/LecturerManagementView";
 import { StudentManagementView } from "./components/students/StudentManagementView";
 import { BookManagementView } from "./components/books/BookManagementView";
+import { PrintingQueueView } from "./components/books/PrintingQueueView";
+import BackOfficeView from "./components/backoffice/BackOfficeView";
 import { FeeManagementView } from "./components/fees/FeeManagementView";
 import { ExamManagementView } from "./components/exams/ExamManagementView";
 import { CommunicationsView } from "./components/communications/CommunicationsView";
@@ -25,12 +27,33 @@ const MainContent = () => {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handler);
     return () => window.removeEventListener('resize', handler);
   }, []);
+
+  useEffect(() => {
+    const onLocationChange = () => setCurrentPath(window.location.pathname);
+    window.addEventListener('popstate', onLocationChange);
+    window.addEventListener('hashchange', onLocationChange);
+    return () => {
+      window.removeEventListener('popstate', onLocationChange);
+      window.removeEventListener('hashchange', onLocationChange);
+    };
+  }, []);
+
+  const isBackOffice =
+    currentPath === '/back-office' ||
+    currentPath.startsWith('/back-office') ||
+    window.location.hash === '#/back-office';
+
+  // If navigating to /back-office, render BackOfficeView directly (standalone portal)
+  if (isBackOffice) {
+    return <BackOfficeView />;
+  }
 
   // If unauthenticated, render Login Page
   if (!sessionUser) {
@@ -77,7 +100,7 @@ const MainContent = () => {
         {activeTab === "fees" && <FeeManagementView isMobile={isMobile} />}
         {activeTab === "exams" && <ExamManagementView isMobile={isMobile} />}
         {activeTab === "books" && <BookManagementView initialTab="catalogue" isMobile={isMobile} />}
-        {activeTab === "printing" && <BookManagementView initialTab="printing" isMobile={isMobile} />}
+        {activeTab === "printing" && <PrintingQueueView isMobile={isMobile} />}
         {activeTab === "communications" && <CommunicationsView isMobile={isMobile} />}
         {activeTab === "parents" && <ParentPortalView isMobile={isMobile} />}
         {activeTab === "documents" && <DocumentCentreView isMobile={isMobile} />}
