@@ -67,9 +67,33 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
     severity: 'Warning',
   });
 
+  const [streamValue, setStreamValue] = useState(
+    student?.stream || student?.streamName || ''
+  );
+
+  useEffect(() => {
+    setStreamValue(student?.stream || student?.streamName || '');
+  }, [student?.id || student?.studentId || student?.regNo]);
+
   const studentIdStr = (
     student?.id || student?.regNo || student?.studentId || ''
   ).toString();
+
+  const saveStream = (val) => {
+    const all = safeLS('pba_students', []) || [];
+    const updated = all.map(s => {
+      const sId = (s.id || s.studentId || s.regNo || '').toString();
+      if (sId !== studentIdStr) return s;
+      return { ...s, stream: val, streamName: val };
+    });
+    saveLS('pba_students', updated);
+    setStreamValue(val);
+    if (student) {
+      student.stream = val;
+      student.streamName = val;
+    }
+    setBatchRefresh(r => r + 1); // force re-render
+  };
 
   const enrolledBatches = React.useMemo(() => {
     return (safeLS('pba_batches', []) || []).filter(b =>
@@ -196,6 +220,30 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
           (e.batchName === batchNameOrId || e.batchId === batchNameOrId))
       );
       saveLS('pba_batch_enrollments', updatedEnrollments);
+
+      // Check remaining batches for this student
+      const remainingBatches = updatedBatches.filter(b =>
+        (b.students || []).some(s =>
+          s.toString() === studentIdStr ||
+          (typeof s === 'object' &&
+            (s.id || s.studentId || s.regNo || '').toString() === studentIdStr)
+        )
+      );
+
+      // If no batches remain, clear stream on the student record
+      if (remainingBatches.length === 0) {
+        const allStudents = safeLS('pba_students', []) || [];
+        saveLS('pba_students', allStudents.map(s => {
+          const sId = (s.id || s.studentId || s.regNo || '').toString();
+          if (sId !== studentIdStr) return s;
+          return { ...s, stream: '', streamName: '' };
+        }));
+        setStreamValue(''); // update local state immediately
+        if (student) {
+          student.stream = '';
+          student.streamName = '';
+        }
+      }
 
       if (student) {
         if (Array.isArray(student.batches)) {
@@ -728,6 +776,59 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                       }}>
                         {heroStatusText}
                       </span>
+                    </div>
+
+                    {/* Stream row ABOVE Admin Notes */}
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{
+                        display: 'block', fontSize: 11, fontWeight: 700,
+                        color: '#6B7280', textTransform: 'uppercase',
+                        letterSpacing: '0.5px', marginBottom: 6
+                      }}>Stream</label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <select
+                          value={streamValue}
+                          onChange={e => setStreamValue(e.target.value)}
+                          style={{
+                            flex: 1, padding: '8px 10px',
+                            border: '1px solid #D1D5DB', borderRadius: 8,
+                            fontSize: 13, color: streamValue ? '#111827' : '#9CA3AF',
+                            background: 'white'
+                          }}
+                        >
+                          <option value="">— No stream assigned —</option>
+                          <option value="Science">Science</option>
+                          <option value="Biology Science">Biology Science</option>
+                          <option value="Physical Science">Physical Science</option>
+                          <option value="Arts">Arts</option>
+                          <option value="Commerce">Commerce</option>
+                          <option value="Technology">Technology</option>
+                          <option value="Mathematics">Mathematics</option>
+                          <option value="Other">Other</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => saveStream(streamValue)}
+                          style={{
+                            padding: '8px 14px',
+                            background: '#2563EB', color: 'white',
+                            border: 'none', borderRadius: 8,
+                            fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >Save</button>
+                      </div>
+                      {streamValue && (
+                        <button
+                          type="button"
+                          onClick={() => saveStream('')}
+                          style={{
+                            marginTop: 4, background: 'none', border: 'none',
+                            fontSize: 11, color: '#9CA3AF', cursor: 'pointer',
+                            padding: 0, textDecoration: 'underline'
+                          }}
+                        >Clear stream</button>
+                      )}
                     </div>
 
                     <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: 500, marginBottom: '4px' }}>

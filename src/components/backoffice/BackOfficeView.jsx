@@ -44,21 +44,42 @@ const SEED_PRINT_JOBS = [
 ];
 
 export default function BackOfficeView() {
-  // Ensure default PIN on first load
+  // Ensure default staff account on first load if empty
   useEffect(() => {
-    if (!safeLS("pba_backoffice_pin", null)) {
-      saveLS("pba_backoffice_pin", "1234");
+    const seed = safeLS("pba_staff_accounts", []) || [];
+    if (seed.length === 0) {
+      saveLS("pba_staff_accounts", [
+        {
+          id: "staff-default",
+          name: "Back Office Staff",
+          username: "backoffice",
+          password: "1234",
+          permissions: { printing: true },
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          createdBy: "Admin"
+        }
+      ]);
     }
   }, []);
 
   // Authentication State via sessionStorage
-  const [boLoggedIn, setBoLoggedIn] = useState(
-    () => sessionStorage.getItem("pba_bo_session") === "true"
-  );
+  // boLoggedIn is false OR { staffId, name, permissions }
+  const [boLoggedIn, setBoLoggedIn] = useState(() => {
+    try {
+      const s = sessionStorage.getItem("pba_bo_session");
+      if (!s) return false;
+      const parsed = JSON.parse(s);
+      return parsed && parsed.staffId ? parsed : false;
+    } catch {
+      return false;
+    }
+  });
 
-  // Login PIN state
-  const [pinInput, setPinInput] = useState("");
-  const [pinError, setPinError] = useState("");
+  // Login credentials state
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
 
   // Jobs state
   const [jobs, setJobs] = useState(() => {
@@ -85,11 +106,6 @@ export default function BackOfficeView() {
   // Card history visibility state: { [jobId]: boolean }
   const [expandedHistory, setExpandedHistory] = useState({});
 
-  // Change PIN Modal state
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [pinForm, setPinForm] = useState({ current: "", newPin: "", confirm: "" });
-  const [pinChangeMsg, setPinChangeMsg] = useState({ text: "", isError: false });
-
   // Refresh handler
   const handleRefresh = useCallback(() => {
     setRefreshSpin(true);
@@ -112,67 +128,43 @@ export default function BackOfficeView() {
     return () => clearInterval(interval);
   }, [boLoggedIn]);
 
-  // Physical keyboard support for PIN screen
-  useEffect(() => {
-    if (boLoggedIn) return;
-    const handleKeyDown = (e) => {
-      if (e.key >= "0" && e.key <= "9") {
-        if (pinInput.length < 4) {
-          const next = pinInput + e.key;
-          setPinInput(next);
-          setPinError("");
-          if (next.length === 4) {
-            validatePin(next);
-          }
-        }
-      } else if (e.key === "Backspace") {
-        setPinInput((prev) => prev.slice(0, -1));
-        setPinError("");
-      } else if (e.key === "Enter") {
-        if (pinInput.length === 4) {
-          validatePin(pinInput);
-        }
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [boLoggedIn, pinInput]);
-
-  // Validate entered PIN
-  const validatePin = (input) => {
-    const targetPin = safeLS("pba_backoffice_pin", "1234") || "1234";
-    if (input === targetPin) {
-      sessionStorage.setItem("pba_bo_session", "true");
-      setBoLoggedIn(true);
-      setPinInput("");
-      setPinError("");
-    } else {
-      setPinError("Incorrect PIN. Please try again.");
-      setPinInput("");
-    }
-  };
-
-  const handleKeypadPress = (val) => {
-    if (val === "⌫") {
-      setPinInput((prev) => prev.slice(0, -1));
-      setPinError("");
+  // Login handler
+  const handleBoLogin = () => {
+    setLoginError("");
+    if (!loginUsername.trim() || !loginPassword.trim()) {
+      setLoginError("Please enter your username and password.");
       return;
     }
-    if (pinInput.length < 4) {
-      const next = pinInput + val;
-      setPinInput(next);
-      setPinError("");
-      if (next.length === 4) {
-        validatePin(next);
-      }
+    const accounts = safeLS("pba_staff_accounts", []) || [];
+    const match = accounts.find(
+      (a) =>
+        (a.username || "").toLowerCase() === loginUsername.trim().toLowerCase() &&
+        a.password === loginPassword
+    );
+    if (!match) {
+      setLoginError("Incorrect username or password.");
+      setLoginPassword("");
+      return;
     }
+    if (!match.isActive) {
+      setLoginError("Your account has been deactivated. Contact admin.");
+      return;
+    }
+    const session = {
+      staffId: match.id,
+      name: match.name,
+      permissions: match.permissions
+    };
+    sessionStorage.setItem("pba_bo_session", JSON.stringify(session));
+    setBoLoggedIn(session);
+    setLoginUsername("");
+    setLoginPassword("");
   };
 
-  const handleLogout = () => {
+  // Logout handler
+  const handleBoLogout = () => {
     sessionStorage.removeItem("pba_bo_session");
     setBoLoggedIn(false);
-    setPinInput("");
-    setPinError("");
   };
 
   // Action Button Click -> Open Confirmation
@@ -191,12 +183,14 @@ export default function BackOfficeView() {
     const { jobId, newStatus, note } = confirmModal;
     if (!jobId || !newStatus) return;
 
+    const updaterName = boLoggedIn?.name ? `Back Office (${boLoggedIn.name})` : "Back Office";
+
     const currentJobs = safeLS("pba_print_jobs", []) || [];
     const updated = currentJobs.map((j) => {
       if (j.id !== jobId) return j;
       const historyEntry = {
         status: newStatus,
-        updatedBy: "Back Office",
+        updatedBy: updaterName,
         updatedAt: new Date().toISOString(),
         note: note.trim()
       };
@@ -207,7 +201,7 @@ export default function BackOfficeView() {
         ...(newStatus === "distributed"
           ? {
               distributedAt: new Date().toISOString(),
-              distributedBy: "Back Office"
+              distributedBy: updaterName
             }
           : {})
       };
@@ -226,45 +220,24 @@ export default function BackOfficeView() {
     }));
   };
 
-  // Save New PIN
-  const handleSavePin = () => {
-    const currentStored = safeLS("pba_backoffice_pin", "1234") || "1234";
-    if (pinForm.current !== currentStored) {
-      setPinChangeMsg({ text: "Current PIN is incorrect.", isError: true });
-      return;
-    }
-    if (!/^\d{4}$/.test(pinForm.newPin)) {
-      setPinChangeMsg({ text: "New PIN must be exactly 4 digits.", isError: true });
-      return;
-    }
-    if (pinForm.newPin !== pinForm.confirm) {
-      setPinChangeMsg({ text: "New PIN and Confirm PIN do not match.", isError: true });
-      return;
-    }
-
-    saveLS("pba_backoffice_pin", pinForm.newPin);
-    setPinChangeMsg({ text: "PIN successfully updated!", isError: false });
-    setTimeout(() => {
-      setShowPinModal(false);
-      setPinForm({ current: "", newPin: "", confirm: "" });
-      setPinChangeMsg({ text: "", isError: false });
-    }, 1200);
-  };
-
   // Formatting date helper
   const formatDate = (isoStr) => {
     if (!isoStr) return "";
     try {
       const d = new Date(isoStr);
-      return d.toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-        year: "numeric"
-      }) + ", " + d.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true
-      });
+      return (
+        d.toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          year: "numeric"
+        }) +
+        ", " +
+        d.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true
+        })
+      );
     } catch {
       return isoStr;
     }
@@ -296,192 +269,157 @@ export default function BackOfficeView() {
       <div
         style={{
           minHeight: "100vh",
+          background: "#F3F4F6",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F2042 100%)",
           padding: "20px",
           fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
         }}
       >
         <div
           style={{
-            background: "#FFFFFF",
-            borderRadius: "20px",
-            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1)",
-            padding: "36px 32px",
-            width: "360px",
+            background: "white",
+            borderRadius: 20,
+            padding: "40px 36px",
+            width: 380,
             maxWidth: "92vw",
-            textAlign: "center",
+            boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
             boxSizing: "border-box"
           }}
         >
-          {/* Portal Brand */}
-          <div
-            style={{
-              width: "56px",
-              height: "56px",
-              margin: "0 auto 14px",
-              borderRadius: "14px",
-              background: "linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "26px",
-              boxShadow: "0 8px 16px rgba(37, 99, 235, 0.25)"
-            }}
-          >
-            🖨
-          </div>
-
-          <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 700, color: "#0F172A" }}>
-            Back Office Staff Portal
-          </h2>
-          <div style={{ fontSize: "13px", color: "#64748B", marginBottom: "24px", fontWeight: 500 }}>
-            PBA Full-Time Portal
-          </div>
-
-          <div style={{ fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "14px" }}>
-            Enter your staff PIN
-          </div>
-
-          {/* 4 PIN Dots */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              gap: "14px",
-              marginBottom: "20px"
-            }}
-          >
-            {[0, 1, 2, 3].map((idx) => {
-              const isFilled = pinInput.length > idx;
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    width: "16px",
-                    height: "16px",
-                    borderRadius: "50%",
-                    border: `2px solid ${isFilled ? "#2563EB" : "#CBD5E1"}`,
-                    background: isFilled ? "#2563EB" : "transparent",
-                    transition: "all 0.15s ease",
-                    transform: isFilled ? "scale(1.15)" : "scale(1)"
-                  }}
-                />
-              );
-            })}
-          </div>
-
-          {/* Error Message */}
-          {pinError && (
+          {/* Icon + title */}
+          <div style={{ textAlign: "center", marginBottom: 28 }}>
             <div
               style={{
-                fontSize: "12px",
-                color: "#DC2626",
-                fontWeight: 600,
-                background: "#FEF2F2",
-                border: "1px solid #FECACA",
-                borderRadius: "8px",
-                padding: "8px 10px",
-                marginBottom: "16px"
+                width: 56,
+                height: 56,
+                borderRadius: 16,
+                background: "linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 26,
+                margin: "0 auto 14px",
+                boxShadow: "0 8px 16px rgba(37, 99, 235, 0.25)"
               }}
             >
-              {pinError}
+              🖨
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#111827" }}>
+              Back Office Staff Portal
+            </div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>
+              PBA Full-Time Portal
+            </div>
+          </div>
+
+          {/* Error */}
+          {loginError && (
+            <div
+              style={{
+                background: "#FEF2F2",
+                border: "1px solid #FECACA",
+                borderRadius: 8,
+                padding: "10px 14px",
+                fontSize: 13,
+                color: "#DC2626",
+                marginBottom: 16,
+                textAlign: "center"
+              }}
+            >
+              {loginError}
             </div>
           )}
 
-          {/* Keypad Grid */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: "10px",
-              marginBottom: "20px"
-            }}
-          >
-            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map((btn, i) => {
-              if (btn === "") {
-                return <div key={i} />;
-              }
-              const isBackspace = btn === "⌫";
-              return (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => handleKeypadPress(btn)}
-                  style={{
-                    height: "50px",
-                    borderRadius: "12px",
-                    border: "1px solid #E2E8F0",
-                    background: isBackspace ? "#F1F5F9" : "#F8FAFC",
-                    fontSize: isBackspace ? "18px" : "19px",
-                    fontWeight: 600,
-                    color: isBackspace ? "#475569" : "#0F172A",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    transition: "all 0.12s ease",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "#E2E8F0";
-                    e.currentTarget.style.transform = "translateY(-1px)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = isBackspace ? "#F1F5F9" : "#F8FAFC";
-                    e.currentTarget.style.transform = "translateY(0)";
-                  }}
-                >
-                  {btn}
-                </button>
-              );
-            })}
+          {/* Username */}
+          <div style={{ marginBottom: 14 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#374151",
+                marginBottom: 6
+              }}
+            >
+              Username
+            </label>
+            <input
+              type="text"
+              placeholder="Enter your username"
+              value={loginUsername}
+              onChange={(e) => setLoginUsername(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleBoLogin()}
+              style={{
+                width: "100%",
+                padding: "11px 14px",
+                border: "1px solid #D1D5DB",
+                borderRadius: 10,
+                fontSize: 14,
+                color: "#111827",
+                boxSizing: "border-box"
+              }}
+            />
           </div>
 
-          {/* Login Button */}
+          {/* Password */}
+          <div style={{ marginBottom: 24 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#374151",
+                marginBottom: 6
+              }}
+            >
+              Password
+            </label>
+            <input
+              type="password"
+              placeholder="Enter your password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleBoLogin()}
+              style={{
+                width: "100%",
+                padding: "11px 14px",
+                border: "1px solid #D1D5DB",
+                borderRadius: 10,
+                fontSize: 14,
+                color: "#111827",
+                boxSizing: "border-box"
+              }}
+            />
+          </div>
+
+          {/* Login button */}
           <button
             type="button"
-            onClick={() => validatePin(pinInput)}
-            disabled={pinInput.length !== 4}
+            onClick={handleBoLogin}
             style={{
               width: "100%",
-              padding: "12px",
-              borderRadius: "10px",
+              padding: "13px",
+              background: "linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)",
+              color: "white",
               border: "none",
-              background: pinInput.length === 4 ? "#2563EB" : "#94A3B8",
-              color: "#FFFFFF",
-              fontSize: "14px",
-              fontWeight: 600,
-              cursor: pinInput.length === 4 ? "pointer" : "not-allowed",
-              transition: "all 0.15s ease",
-              boxShadow:
-                pinInput.length === 4
-                  ? "0 4px 12px rgba(37, 99, 235, 0.35)"
-                  : "none"
+              borderRadius: 10,
+              fontSize: 15,
+              fontWeight: 700,
+              cursor: "pointer",
+              marginBottom: 16,
+              boxShadow: "0 4px 12px rgba(37, 99, 235, 0.3)"
             }}
           >
             Login
           </button>
 
-          {/* Admin Link */}
-          <div style={{ marginTop: "22px", borderTop: "1px solid #F1F5F9", paddingTop: "14px" }}>
-            <a
-              href="/"
-              style={{
-                fontSize: "12px",
-                color: "#64748B",
-                textDecoration: "none",
-                fontWeight: 500,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "4px"
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = "#1E293B")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = "#64748B")}
-            >
-              Admin? → Back to Admin Portal
+          {/* Admin link */}
+          <div style={{ textAlign: "center", fontSize: 12, color: "#9CA3AF" }}>
+            Admin?{" "}
+            <a href="/" style={{ color: "#2563EB", textDecoration: "none", fontWeight: 600 }}>
+              → Back to Admin Portal
             </a>
           </div>
         </div>
@@ -490,7 +428,54 @@ export default function BackOfficeView() {
   }
 
   // ════════════════════════════════════════════════════════════════
-  // 2. DASHBOARD VIEW (When logged in)
+  // 2. PERMISSION CHECK (After login)
+  // ════════════════════════════════════════════════════════════════
+  const canSeePrinting = boLoggedIn && boLoggedIn.permissions?.printing;
+
+  if (!canSeePrinting) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#F3F4F6",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+          padding: 24,
+          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        }}
+      >
+        <div style={{ fontSize: 48 }}>🚫</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#111827" }}>Access Denied</div>
+        <div style={{ fontSize: 13, color: "#6B7280", textAlign: "center", maxWidth: 320, lineHeight: 1.5 }}>
+          You don't have permission to access the Printing Queue. Contact your admin to request access.
+        </div>
+        <button
+          type="button"
+          onClick={handleBoLogout}
+          style={{
+            marginTop: 8,
+            padding: "10px 24px",
+            background: "#EF4444",
+            color: "white",
+            border: "none",
+            borderRadius: 8,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+            boxShadow: "0 2px 6px rgba(239, 68, 68, 0.25)"
+          }}
+        >
+          Logout
+        </button>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // 3. DASHBOARD VIEW (When logged in & has access)
   // ════════════════════════════════════════════════════════════════
   const columns = [
     {
@@ -573,7 +558,8 @@ export default function BackOfficeView() {
               PBA Back Office
             </h1>
             <div style={{ fontSize: "13px", opacity: 0.9, marginTop: "2px", fontWeight: 400 }}>
-              Print Job Dashboard · <strong style={{ fontWeight: 600 }}>{activeCount} active jobs</strong>
+              Logged in as <strong style={{ fontWeight: 600 }}>{boLoggedIn.name || "Staff"}</strong> ·{" "}
+              {activeCount} active jobs
             </div>
           </div>
         </div>
@@ -618,27 +604,7 @@ export default function BackOfficeView() {
 
           <button
             type="button"
-            onClick={() => setShowPinModal(true)}
-            style={{
-              background: "transparent",
-              border: "1px solid rgba(255, 255, 255, 0.2)",
-              color: "#FFFFFF",
-              borderRadius: "8px",
-              padding: "7px 12px",
-              fontSize: "13px",
-              fontWeight: 500,
-              cursor: "pointer",
-              transition: "all 0.15s ease"
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-          >
-            🔑 PIN
-          </button>
-
-          <button
-            type="button"
-            onClick={handleLogout}
+            onClick={handleBoLogout}
             style={{
               background: "#EF4444",
               border: "none",
@@ -1051,20 +1017,6 @@ export default function BackOfficeView() {
       >
         <div>PBA Full-Time Portal &copy; {new Date().getFullYear()} — Back Office System</div>
         <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
-          <button
-            type="button"
-            onClick={() => setShowPinModal(true)}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#64748B",
-              fontSize: "12px",
-              cursor: "pointer",
-              textDecoration: "underline"
-            }}
-          >
-            Change Staff PIN
-          </button>
           <a href="/" style={{ color: "#64748B", textDecoration: "none" }}>
             Admin Portal ↗
           </a>
@@ -1178,187 +1130,6 @@ export default function BackOfficeView() {
                 }}
               >
                 Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Change PIN Modal ── */}
-      {showPinModal && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15, 23, 42, 0.6)",
-            backdropFilter: "blur(2px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 9999,
-            padding: "16px"
-          }}
-        >
-          <div
-            style={{
-              background: "#FFFFFF",
-              borderRadius: "16px",
-              padding: "24px 28px",
-              width: "380px",
-              maxWidth: "92vw",
-              boxShadow: "0 20px 40px rgba(0,0,0,0.25)"
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "16px"
-              }}
-            >
-              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#0F172A" }}>
-                🔑 Change Staff PIN
-              </h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPinModal(false);
-                  setPinChangeMsg({ text: "", isError: false });
-                }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  fontSize: "20px",
-                  cursor: "pointer",
-                  color: "#94A3B8"
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            {pinChangeMsg.text && (
-              <div
-                style={{
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  padding: "8px 12px",
-                  borderRadius: "8px",
-                  marginBottom: "14px",
-                  background: pinChangeMsg.isError ? "#FEF2F2" : "#F0FDF4",
-                  color: pinChangeMsg.isError ? "#DC2626" : "#166534",
-                  border: `1px solid ${pinChangeMsg.isError ? "#FECACA" : "#BBF7D0"}`
-                }}
-              >
-                {pinChangeMsg.text}
-              </div>
-            )}
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
-              <div>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
-                  Current PIN:
-                </label>
-                <input
-                  type="password"
-                  maxLength={4}
-                  value={pinForm.current}
-                  onChange={(e) => setPinForm((p) => ({ ...p, current: e.target.value }))}
-                  placeholder="4 digits"
-                  style={{
-                    width: "100%",
-                    padding: "9px 12px",
-                    border: "1px solid #CBD5E1",
-                    borderRadius: "8px",
-                    fontSize: "14px",
-                    letterSpacing: "2px",
-                    boxSizing: "border-box"
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
-                  New PIN:
-                </label>
-                <input
-                  type="password"
-                  maxLength={4}
-                  value={pinForm.newPin}
-                  onChange={(e) => setPinForm((p) => ({ ...p, newPin: e.target.value }))}
-                  placeholder="4 digits"
-                  style={{
-                    width: "100%",
-                    padding: "9px 12px",
-                    border: "1px solid #CBD5E1",
-                    borderRadius: "8px",
-                    fontSize: "14px",
-                    letterSpacing: "2px",
-                    boxSizing: "border-box"
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
-                  Confirm PIN:
-                </label>
-                <input
-                  type="password"
-                  maxLength={4}
-                  value={pinForm.confirm}
-                  onChange={(e) => setPinForm((p) => ({ ...p, confirm: e.target.value }))}
-                  placeholder="4 digits"
-                  style={{
-                    width: "100%",
-                    padding: "9px 12px",
-                    border: "1px solid #CBD5E1",
-                    borderRadius: "8px",
-                    fontSize: "14px",
-                    letterSpacing: "2px",
-                    boxSizing: "border-box"
-                  }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPinModal(false);
-                  setPinChangeMsg({ text: "", isError: false });
-                }}
-                style={{
-                  padding: "9px 16px",
-                  background: "#F1F5F9",
-                  border: "1px solid #E2E8F0",
-                  borderRadius: "8px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  color: "#475569",
-                  cursor: "pointer"
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSavePin}
-                style={{
-                  padding: "9px 20px",
-                  background: "#2563EB",
-                  border: "none",
-                  borderRadius: "8px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  color: "#FFFFFF",
-                  cursor: "pointer",
-                  boxShadow: "0 2px 8px rgba(37, 99, 235, 0.3)"
-                }}
-              >
-                Save PIN
               </button>
             </div>
           </div>

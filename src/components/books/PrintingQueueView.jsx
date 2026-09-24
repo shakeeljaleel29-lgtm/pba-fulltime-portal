@@ -63,6 +63,146 @@ export const PrintingQueueView = ({ isMobile }) => {
     return stored;
   });
 
+  // Active main tab: "print_jobs" | "staff_accounts"
+  const [mainTab, setMainTab] = useState("print_jobs");
+
+  // Staff accounts state
+  const [staffModal, setStaffModal] = useState(false);
+  const [editingStaff, setEditingStaff] = useState(null);
+  const [staffForm, setStaffForm] = useState({
+    name: "",
+    username: "",
+    password: "",
+    permissions: { printing: true }
+  });
+  const [staffRefresh, setStaffRefresh] = useState(0);
+
+  // Seed pba_staff_accounts if empty
+  useEffect(() => {
+    const seed = safeLS("pba_staff_accounts", []) || [];
+    if (seed.length === 0) {
+      saveLS("pba_staff_accounts", [
+        {
+          id: "staff-default",
+          name: "Back Office Staff",
+          username: "backoffice",
+          password: "1234",
+          permissions: { printing: true },
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          createdBy: "Admin"
+        }
+      ]);
+      setStaffRefresh((r) => r + 1);
+    }
+  }, []);
+
+  const staffAccounts = React.useMemo(() => {
+    return safeLS("pba_staff_accounts", []) || [];
+  }, [staffRefresh]);
+
+  const openStaffModal = (existing) => {
+    if (existing) {
+      setEditingStaff(existing);
+      setStaffForm({
+        name: existing.name || "",
+        username: existing.username || "",
+        password: "",
+        permissions: { ...(existing.permissions || { printing: true }) }
+      });
+    } else {
+      setEditingStaff(null);
+      setStaffForm({
+        name: "",
+        username: "",
+        password: "",
+        permissions: { printing: true }
+      });
+    }
+    setStaffModal(true);
+  };
+
+  const saveStaffAccount = () => {
+    if (!staffForm.name.trim() || !staffForm.username.trim()) {
+      alert("Name and username are required.");
+      return;
+    }
+    if (!editingStaff && !staffForm.password.trim()) {
+      alert("Password is required.");
+      return;
+    }
+
+    const all = safeLS("pba_staff_accounts", []) || [];
+    const formattedUsername = staffForm.username.toLowerCase().replace(/\s+/g, "");
+    const dup = all.find(
+      (a) =>
+        (a.username || "").toLowerCase() === formattedUsername &&
+        (!editingStaff || a.id !== editingStaff.id)
+    );
+    if (dup) {
+      alert("Username already taken.");
+      return;
+    }
+
+    const finalPassword = staffForm.password.trim() || (editingStaff ? editingStaff.password : "");
+
+    let updated;
+    if (editingStaff) {
+      updated = all.map((a) =>
+        a.id === editingStaff.id
+          ? {
+              ...a,
+              name: staffForm.name.trim(),
+              username: formattedUsername,
+              password: finalPassword,
+              permissions: staffForm.permissions
+            }
+          : a
+      );
+    } else {
+      updated = [
+        ...all,
+        {
+          id: Date.now().toString(),
+          name: staffForm.name.trim(),
+          username: formattedUsername,
+          password: finalPassword,
+          permissions: staffForm.permissions,
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          createdBy: "Admin"
+        }
+      ];
+    }
+
+    saveLS("pba_staff_accounts", updated);
+    setStaffRefresh((r) => r + 1);
+    setStaffModal(false);
+  };
+
+  const toggleStaffActive = (id) => {
+    const all = safeLS("pba_staff_accounts", []) || [];
+    saveLS(
+      "pba_staff_accounts",
+      all.map((a) => (a.id === id ? { ...a, isActive: !a.isActive } : a))
+    );
+    setStaffRefresh((r) => r + 1);
+  };
+
+  const deleteStaffAccount = (id) => {
+    const all = safeLS("pba_staff_accounts", []) || [];
+    const activePrinting = all.filter((a) => a.isActive && a.permissions?.printing);
+    const target = all.find((a) => a.id === id);
+    if (activePrinting.length <= 1 && target?.isActive && target?.permissions?.printing) {
+      alert("Cannot delete the only active staff account.");
+      return;
+    }
+
+    if (!window.confirm("Delete this staff account?")) return;
+    saveLS("pba_staff_accounts", all.filter((a) => a.id !== id));
+    setStaffRefresh((r) => r + 1);
+  };
+
   // Filter & search states
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -364,7 +504,63 @@ export const PrintingQueueView = ({ isMobile }) => {
         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
       }}
     >
-      {/* ── Page Header & Top Actions ── */}
+      {/* ── Secondary Tab Bar at the TOP ── */}
+      <div
+        style={{
+          display: "flex",
+          gap: "8px",
+          borderBottom: "2px solid #E2E8F0",
+          marginBottom: "-8px"
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setMainTab("print_jobs")}
+          style={{
+            background: "none",
+            border: "none",
+            borderBottom: mainTab === "print_jobs" ? "3px solid #2563EB" : "3px solid transparent",
+            padding: "10px 18px",
+            fontSize: "14px",
+            fontWeight: 700,
+            color: mainTab === "print_jobs" ? "#2563EB" : "#64748B",
+            cursor: "pointer",
+            marginBottom: "-2px",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            transition: "all 0.15s ease"
+          }}
+        >
+          🖨 Print Jobs ({jobs.length})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMainTab("staff_accounts")}
+          style={{
+            background: "none",
+            border: "none",
+            borderBottom: mainTab === "staff_accounts" ? "3px solid #2563EB" : "3px solid transparent",
+            padding: "10px 18px",
+            fontSize: "14px",
+            fontWeight: 700,
+            color: mainTab === "staff_accounts" ? "#2563EB" : "#64748B",
+            cursor: "pointer",
+            marginBottom: "-2px",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            transition: "all 0.15s ease"
+          }}
+        >
+          👥 Staff Accounts ({staffAccounts.length})
+        </button>
+      </div>
+
+      {mainTab === "print_jobs" && (
+        <>
+          {/* ── Page Header & Top Actions ── */}
       <div
         style={{
           display: "flex",
@@ -801,6 +997,231 @@ export const PrintingQueueView = ({ isMobile }) => {
           </table>
         </div>
       </div>
+      </>
+      )}
+
+      {/* ── TAB: Staff Accounts ── */}
+      {mainTab === "staff_accounts" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          {/* Header row */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: "#FFFFFF",
+              padding: "20px 24px",
+              borderRadius: "16px",
+              border: "1px solid #E2E8F0",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#111827" }}>
+                Staff Accounts
+              </div>
+              <div style={{ fontSize: 13, color: "#64748B", marginTop: 2 }}>
+                Manage login credentials and permissions for back office staff
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => openStaffModal(null)}
+              style={{
+                background: "#2563EB",
+                color: "white",
+                border: "none",
+                borderRadius: 8,
+                padding: "8px 16px",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                boxShadow: "0 2px 6px rgba(37, 99, 235, 0.25)"
+              }}
+            >
+              + Add Staff
+            </button>
+          </div>
+
+          {/* Staff Accounts Table Card */}
+          <div
+            style={{
+              background: "white",
+              border: "1px solid #E5E7EB",
+              borderRadius: 12,
+              overflow: "hidden",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.04)"
+            }}
+          >
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", color: "#6B7280" }}>
+                    <th style={{ padding: "10px 16px", fontWeight: 700, fontSize: 11, textTransform: "uppercase" }}>
+                      NAME
+                    </th>
+                    <th style={{ padding: "10px 16px", fontWeight: 700, fontSize: 11, textTransform: "uppercase" }}>
+                      USERNAME
+                    </th>
+                    <th style={{ padding: "10px 16px", fontWeight: 700, fontSize: 11, textTransform: "uppercase" }}>
+                      PERMISSIONS
+                    </th>
+                    <th style={{ padding: "10px 16px", fontWeight: 700, fontSize: 11, textTransform: "uppercase" }}>
+                      STATUS
+                    </th>
+                    <th style={{ padding: "10px 16px", fontWeight: 700, fontSize: 11, textTransform: "uppercase", textAlign: "right" }}>
+                      ACTIONS
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {staffAccounts.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: "center", padding: "32px", color: "#9CA3AF", fontSize: 13 }}>
+                        No staff accounts. Add one to get started.
+                      </td>
+                    </tr>
+                  ) : (
+                    staffAccounts.map((account) => (
+                      <tr
+                        key={account.id}
+                        style={{
+                          borderBottom: "1px solid #F9FAFB",
+                          fontSize: 13,
+                          transition: "background 0.12s ease"
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#F8FAFC")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        {/* Name */}
+                        <td style={{ padding: "12px 16px", fontWeight: 600, color: "#111827" }}>
+                          {account.name}
+                        </td>
+
+                        {/* Username */}
+                        <td style={{ padding: "12px 16px" }}>
+                          <span
+                            style={{
+                              fontFamily: "monospace",
+                              color: "#374151",
+                              fontSize: 12,
+                              background: "#F3F4F6",
+                              borderRadius: 4,
+                              padding: "2px 6px"
+                            }}
+                          >
+                            {account.username}
+                          </span>
+                        </td>
+
+                        {/* Permissions */}
+                        <td style={{ padding: "12px 16px" }}>
+                          {account.permissions?.printing ? (
+                            <span
+                              style={{
+                                background: "#EFF6FF",
+                                color: "#1D4ED8",
+                                border: "1px solid #BFDBFE",
+                                borderRadius: 20,
+                                padding: "2px 10px",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4
+                              }}
+                            >
+                              🖨 Printing
+                            </span>
+                          ) : (
+                            <span style={{ color: "#9CA3AF" }}>—</span>
+                          )}
+                        </td>
+
+                        {/* Status */}
+                        <td style={{ padding: "12px 16px" }}>
+                          <span
+                            style={{
+                              background: account.isActive ? "#D1FAE5" : "#F3F4F6",
+                              color: account.isActive ? "#065F46" : "#9CA3AF",
+                              borderRadius: 20,
+                              padding: "2px 10px",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              display: "inline-block"
+                            }}
+                          >
+                            {account.isActive ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+
+                        {/* Actions */}
+                        <td style={{ padding: "12px 16px", textAlign: "right", whiteSpace: "nowrap" }}>
+                          <button
+                            type="button"
+                            onClick={() => openStaffModal(account)}
+                            style={{
+                              background: "#F3F4F6",
+                              border: "1px solid #E5E7EB",
+                              borderRadius: 6,
+                              padding: "4px 8px",
+                              fontSize: 12,
+                              cursor: "pointer",
+                              color: "#374151",
+                              marginRight: 4,
+                              fontWeight: 500
+                            }}
+                          >
+                            ✏ Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => toggleStaffActive(account.id)}
+                            style={{
+                              background: account.isActive ? "#FEF3C7" : "#D1FAE5",
+                              border: `1px solid ${account.isActive ? "#FDE68A" : "#BBF7D0"}`,
+                              borderRadius: 6,
+                              padding: "4px 8px",
+                              fontSize: 12,
+                              cursor: "pointer",
+                              color: account.isActive ? "#92400E" : "#065F46",
+                              marginRight: 4,
+                              fontWeight: 500
+                            }}
+                          >
+                            {account.isActive ? "⏸ Deactivate" : "▶ Activate"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => deleteStaffAccount(account.id)}
+                            style={{
+                              background: "#FEF2F2",
+                              border: "1px solid #FECACA",
+                              borderRadius: 6,
+                              padding: "4px 8px",
+                              fontSize: 12,
+                              cursor: "pointer",
+                              color: "#DC2626",
+                              fontWeight: 500
+                            }}
+                          >
+                            🗑 Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── ENHANCEMENT A: Add Print Request Modal ── */}
       {showAddModal && (
@@ -1518,6 +1939,265 @@ export const PrintingQueueView = ({ isMobile }) => {
                 }}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── STAFF MODAL ── */}
+      {staffModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 16,
+              padding: "28px 32px",
+              width: 440,
+              maxWidth: "92vw",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)"
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 24
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#111827" }}>
+                {editingStaff ? "Edit Staff Account" : "Add Staff Account"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setStaffModal(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 22,
+                  cursor: "pointer",
+                  color: "#6B7280"
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Name */}
+            <div style={{ marginBottom: 16 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#374151",
+                  marginBottom: 6
+                }}
+              >
+                Full Name *
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Nimal Perera"
+                value={staffForm.name}
+                onChange={(e) => setStaffForm((f) => ({ ...f, name: e.target.value }))}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  border: "1px solid #D1D5DB",
+                  borderRadius: 8,
+                  fontSize: 14,
+                  color: "#111827",
+                  boxSizing: "border-box"
+                }}
+              />
+            </div>
+
+            {/* Username */}
+            <div style={{ marginBottom: 16 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#374151",
+                  marginBottom: 6
+                }}
+              >
+                Username *
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. nimal.perera"
+                value={staffForm.username}
+                onChange={(e) =>
+                  setStaffForm((f) => ({
+                    ...f,
+                    username: e.target.value.toLowerCase().replace(/\s+/g, "")
+                  }))
+                }
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  border: "1px solid #D1D5DB",
+                  borderRadius: 8,
+                  fontSize: 14,
+                  color: "#111827",
+                  fontFamily: "monospace",
+                  boxSizing: "border-box"
+                }}
+              />
+              <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>
+                Staff use this to log into the Back Office portal
+              </div>
+            </div>
+
+            {/* Password */}
+            <div style={{ marginBottom: 16 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#374151",
+                  marginBottom: 6
+                }}
+              >
+                {editingStaff ? "New Password (leave blank to keep current)" : "Password *"}
+              </label>
+              <input
+                type="password"
+                placeholder={editingStaff ? "••••••••" : "Enter password"}
+                value={staffForm.password}
+                onChange={(e) => setStaffForm((f) => ({ ...f, password: e.target.value }))}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  border: "1px solid #D1D5DB",
+                  borderRadius: 8,
+                  fontSize: 14,
+                  color: "#111827",
+                  boxSizing: "border-box"
+                }}
+              />
+            </div>
+
+            {/* Permissions */}
+            <div style={{ marginBottom: 24 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#374151",
+                  marginBottom: 10
+                }}
+              >
+                Permissions
+              </label>
+
+              {/* Printing permission toggle */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "12px 16px",
+                  background: "#F9FAFB",
+                  border: "1px solid #E5E7EB",
+                  borderRadius: 8
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>
+                    🖨 Printing Queue
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
+                    Access to the Back Office print job dashboard
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStaffForm((f) => ({
+                      ...f,
+                      permissions: { ...f.permissions, printing: !f.permissions?.printing }
+                    }))
+                  }
+                  style={{
+                    width: 44,
+                    height: 24,
+                    borderRadius: 12,
+                    border: "none",
+                    cursor: "pointer",
+                    background: staffForm.permissions?.printing ? "#2563EB" : "#D1D5DB",
+                    position: "relative",
+                    transition: "background 0.2s",
+                    flexShrink: 0
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: "50%",
+                      background: "white",
+                      position: "absolute",
+                      top: 3,
+                      left: staffForm.permissions?.printing ? 23 : 3,
+                      transition: "left 0.2s",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
+                    }}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => setStaffModal(false)}
+                style={{
+                  padding: "10px 20px",
+                  background: "#F3F4F6",
+                  border: "1px solid #E5E7EB",
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  color: "#374151"
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveStaffAccount}
+                style={{
+                  padding: "10px 24px",
+                  background: "#2563EB",
+                  border: "none",
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  color: "white"
+                }}
+              >
+                {editingStaff ? "Save Changes" : "Create Account"}
               </button>
             </div>
           </div>
