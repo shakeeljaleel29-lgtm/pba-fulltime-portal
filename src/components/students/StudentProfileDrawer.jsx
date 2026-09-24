@@ -228,15 +228,25 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
     fontFamily: "'Inter', sans-serif"
   };
 
+  const disciplineCount =
+    (safeLS('pba_discipline_records', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
+    || (safeLS('pba_discipline', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
+    || studentDiscipline.length;
+
+  const docsCount =
+    (safeLS('pba_student_documents', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
+    || (safeLS('pba_documents', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
+    || studentDocs.length;
+
   const drawerTabs = [
-    { id: "overview", label: "Overview", icon: User },
-    { id: "attendance", label: "Attendance", icon: CalendarCheck },
-    { id: "subjects", label: "Subjects", icon: BookOpen },
-    { id: "marks", label: "Marks & Grades", icon: FileCheck2 },
-    { id: "discipline", label: "Discipline", count: studentDiscipline.length, icon: AlertTriangle },
-    { id: "fees", label: "Fees Ledger", icon: CreditCard },
-    { id: "documents", label: "Documents", count: studentDocs.length, icon: FolderOpen },
-    { id: "report", label: "Report Card", icon: FileSpreadsheet, onClick: () => setShowReportCardModal(true) }
+    { id: "overview", label: "👤 Overview" },
+    { id: "attendance", label: "📅 Attendance" },
+    { id: "subjects", label: "📚 Subjects" },
+    { id: "marks", label: "📝 Marks & Grades" },
+    { id: "discipline", label: "⚠️ Discipline", count: disciplineCount },
+    { id: "fees", label: "💳 Fees Ledger" },
+    { id: "documents", label: "📁 Documents", count: docsCount },
+    { id: "report", label: "📄 Report Card" }
   ];
 
   const isMobileState = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
@@ -250,182 +260,239 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
   const acadPillBg = statusLower === 'withdrawn' ? '#FEE2E2' : statusLower === 'completed' ? '#F3F4F6' : '#D1FAE5';
   const acadPillColor = statusLower === 'withdrawn' ? '#991B1B' : statusLower === 'completed' ? '#374151' : '#065F46';
 
+  const parseDate3Arg = (str) => {
+    if (!str) return null;
+    const parts = str.split('-');
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const d = parseInt(parts[2], 10);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) return new Date(y, m - 1, d);
+    }
+    return null;
+  };
+
   return (
-    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(10,15,28,0.55)', backdropFilter: 'blur(4px)', zIndex: 1050, display: 'flex', alignItems: isMobileState ? 'flex-start' : 'center', justifyContent: 'center', padding: isMobileState ? '10px 8px' : '0', overflowY: 'auto' }}>
-      <div className="modal-card modal-card-lg" style={{ width: isMobileState ? '98vw' : '880px', maxWidth: '98vw', height: "90vh", maxHeight: '92vh', overflowY: 'auto', margin: isMobileState ? '10px auto' : 'auto' }}>
-        {/* SECTION 1 — Compact Hero Strip (replaces current top header) */}
-        <div style={{
-          background: 'linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)',
-          padding: '16px 20px',
+    <>
+      {/* BACKDROP (behind drawer, closes on click) */}
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.45)',
+          zIndex: 1000
+        }}
+      />
+
+      {/* PANEL (the drawer itself) */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          width: '560px',
+          maxWidth: '95vw',
+          height: '100vh',
+          background: '#F9FAFB',
+          zIndex: 1001,
           display: 'flex',
-          alignItems: 'center',
-          gap: '14px',
-          borderTopLeftRadius: '14px',
-          borderTopRightRadius: '14px',
-          flexWrap: isNarrowDrawer ? 'wrap' : 'nowrap'
-        }}>
-          {/* Left: initials avatar */}
-          <div style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '50%',
-            background: 'rgba(255,255,255,0.2)',
-            border: '2px solid rgba(255,255,255,0.3)',
-            fontSize: '16px',
-            fontWeight: 700,
-            color: 'white',
+          flexDirection: 'column',
+          boxShadow: '-8px 0 40px rgba(0,0,0,0.18)',
+          overflow: 'hidden'
+        }}
+      >
+        {/* PART 2 — HEADER STRIP (compact, always visible at top) */}
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)',
+            padding: '16px 20px',
+            flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0
-          }}>
+            gap: 14
+          }}
+        >
+          {/* LEFT — Initials avatar */}
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: '50%',
+              background: 'rgba(255,255,255,0.18)',
+              border: '2px solid rgba(255,255,255,0.3)',
+              color: 'white',
+              fontSize: 17,
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+          >
             {getInitials(student.name)}
           </div>
 
-          {/* Centre (flex: 1) */}
-          <div style={{ flex: 1, minWidth: isNarrowDrawer ? '100%' : '180px' }}>
-            <div style={{ fontSize: '17px', fontWeight: 700, color: 'white' }}>
+          {/* CENTRE (flex 1) */}
+          <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {student.name}
             </div>
-            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.75)', marginTop: '2px' }}>
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 2 }}>
               {student.regNo || student.id || 'No Reg No'}
             </div>
-            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.75)', marginTop: '2px' }}>
-              {(enrolledBatches[0]?.name || resolveBatchName(student.batch || student.batchId || student.batchName) || student.batch || 'No batch assigned')}
-              {student.branch ? ` · ${student.branch}` : ''}
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {(enrolledBatches[0]?.name || resolveBatchName(student.batch || student.batchId || student.batchName) || student.batch || 'No batch')}
+              {` · ${student?.branch || student?.branchName || 'Main'}`}
             </div>
           </div>
 
-          {/* Right: Status pill + actions */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginLeft: isNarrowDrawer ? '0' : 'auto',
-            flexWrap: 'wrap'
-          }}>
-            <div style={{
-              background: heroStatusBg,
-              color: 'white',
-              borderRadius: '20px',
-              padding: '3px 12px',
-              fontSize: '11px',
-              fontWeight: 600,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}>
-              ● {heroStatusText}
+          {/* RIGHT — two items stacked */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
+            {/* Status pill */}
+            <div
+              style={{
+                background: heroStatusBg,
+                color: 'white',
+                borderRadius: 20,
+                padding: '3px 12px',
+                fontSize: 11,
+                fontWeight: 600,
+                marginBottom: 6
+              }}
+            >
+              {heroStatusText}
             </div>
 
-            {currentUser.role === "Admin" && (
+            {/* Row with Actions & Close button */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {currentUser.role === "Admin" && (
+                <button
+                  type="button"
+                  onClick={() => setShowLinkModal(true)}
+                  title="Link Student Account"
+                  style={{
+                    background: 'rgba(255,255,255,0.15)',
+                    border: '1px solid rgba(255,255,255,0.25)',
+                    color: 'white',
+                    borderRadius: 8,
+                    padding: '5px 8px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                >
+                  <Link size={13} />
+                </button>
+              )}
               <button
-                onClick={() => setShowLinkModal(true)}
-                style={ghostBtnStyle}
-                onMouseEnter={e => {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)';
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)';
+                type="button"
+                onClick={handleCopyParentLink}
+                title={copiedLink ? "Link Copied!" : "Copy Parent Link"}
+                style={{
+                  background: 'rgba(255,255,255,0.15)',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  color: 'white',
+                  borderRadius: 8,
+                  padding: '5px 8px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4
                 }}
               >
-                <Link size={14} /> {!isNarrowDrawer && 'Link Student Account'}
+                <Share2 size={13} />
               </button>
-            )}
-            <button
-              onClick={handleCopyParentLink}
-              style={ghostBtnStyle}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)';
-              }}
-            >
-              <Share2 size={14} /> {!isNarrowDrawer && (copiedLink ? "Link Copied!" : "Parent Link")}
-            </button>
-            <button
-              onClick={onClose}
-              style={ghostBtnStyle}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)';
-              }}
-            >
-              <X size={14} /> {!isNarrowDrawer && 'Close'}
-            </button>
+              <button
+                type="button"
+                onClick={onClose}
+                title="Close drawer"
+                style={{
+                  background: 'rgba(255,255,255,0.15)',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  color: 'white',
+                  borderRadius: 8,
+                  padding: '5px 12px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                ×
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Body */}
-        <div className="modal-body" style={{ flex: 1, overflowY: "auto", padding: activeTab === "overview" ? "0 0 16px 0" : "16px 20px" }}>
-          {/* Pill-group style tab bar */}
-          <div style={{
+        {/* PART 3 — TAB BAR (sticky, below header) */}
+        <div
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
+            background: 'white',
+            borderBottom: '1px solid #E5E7EB',
             display: 'flex',
-            gap: '4px',
-            padding: '4px',
-            background: '#F4F5F7',
-            borderRadius: '10px',
-            flexWrap: 'wrap',
-            margin: '16px 16px 0'
-          }}>
-            {drawerTabs.map((tab) => {
-              const IconComp = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={tab.onClick || (() => setActiveTab(tab.id))}
-                  style={{
-                    padding: '7px 14px',
-                    background: isActive ? '#FFFFFF' : 'transparent',
-                    border: 'none',
-                    borderRadius: '7px',
-                    fontSize: '12px',
-                    fontWeight: isActive ? 700 : 500,
-                    color: isActive ? '#1A202C' : '#718096',
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    boxShadow: isActive ? '0 1px 4px rgba(0,0,0,0.10)' : 'none',
-                    transition: 'all 0.15s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    fontFamily: "'Inter', 'Segoe UI', sans-serif"
-                  }}
-                >
-                  {IconComp && (
-                    <IconComp
-                      size={13}
-                      style={{ opacity: isActive ? 1 : 0.6 }}
-                    />
-                  )}
-                  {tab.label}
-                  {tab.count !== undefined && (
-                    <span style={{
-                      background: isActive ? '#EBF4FF' : '#E2E8F0',
-                      color: isActive ? '#2B6CB0' : '#718096',
-                      fontSize: '10px',
+            overflowX: 'auto',
+            padding: '0 16px',
+            flexShrink: 0
+          }}
+        >
+          {drawerTabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  padding: '12px 14px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  color: isActive ? '#2563EB' : '#6B7280',
+                  borderBottom: isActive ? '2px solid #2563EB' : '2px solid transparent',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <span>{tab.label}</span>
+                {tab.count !== undefined && tab.count > 0 && (
+                  <span
+                    style={{
+                      background: isActive ? '#DBEAFE' : '#E5E7EB',
+                      color: isActive ? '#1D4ED8' : '#4B5563',
+                      fontSize: 10,
                       fontWeight: 700,
-                      padding: '1px 5px',
-                      borderRadius: '10px',
-                      marginLeft: '2px'
-                    }}>
-                      {tab.count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                      padding: '1px 6px',
+                      borderRadius: 10
+                    }}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* PART 4 — TAB CONTENT AREA (scrollable body) */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '16px'
+          }}
+        >
           {/* OVERVIEW */}
           {activeTab === "overview" && (() => {
             // ── Enroll date fallback chain ──
@@ -474,13 +541,13 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
 
             return (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {/* ── SECTION 2 — Personal Information card (compact 2-col grid) ── */}
+                {/* ── SECTION 2 — Personal Information card ── */}
                 <div style={{
                   background: 'white',
                   border: '1px solid #E5E7EB',
                   borderRadius: '12px',
                   padding: '16px 20px',
-                  margin: '12px 16px 0'
+                  marginBottom: '12px'
                 }}>
                   <div style={{
                     fontSize: '11px',
@@ -552,7 +619,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                   display: 'grid',
                   gridTemplateColumns: isNarrowDrawer ? '1fr' : '1fr 1fr',
                   gap: '12px',
-                  margin: '12px 16px 0'
+                  marginBottom: '12px'
                 }}>
                   {/* Academic Status card (left) */}
                   <div style={{
@@ -645,6 +712,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                         <span>ENROLLED BATCHES</span>
                       </div>
                       <button
+                        type="button"
                         onClick={() => {
                           setEnrollBatchId("");
                           setEnrollStream("");
@@ -721,8 +789,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                 <div style={{
                   display: 'grid',
                   gridTemplateColumns: isNarrowDrawer ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-                  gap: '8px',
-                  margin: '12px 16px 16px'
+                  gap: '8px'
                 }}>
                   {/* Tile 1: Enrolled */}
                   <div style={{
@@ -826,127 +893,700 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
           })()}
 
           {/* ATTENDANCE */}
-          {activeTab === "attendance" && (
-            <div>
-              <div style={{ display: "flex", gap: "20px", marginBottom: "16px" }}>
-                <div style={{ padding: "12px 20px", background: "#D1FAE5", borderRadius: "8px", textAlign: "center" }}>
-                  <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "#059669" }}>96%</div>
-                  <div style={{ fontSize: "0.75rem", color: "#047857" }}>Attendance Rate</div>
+          {activeTab === "attendance" && (() => {
+            const attendanceList = (safeLS('pba_attendance', []) || [])
+              .filter(r => (r.studentId || r.regNo || '').toString() === studentIdStr);
+
+            const sortedAttendance = [...attendanceList].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+            const totalSessions = sortedAttendance.length;
+            const presentCount = sortedAttendance.filter(r => {
+              const st = (r.status || '').toLowerCase();
+              return st === 'present';
+            }).length;
+            const absentCount = sortedAttendance.filter(r => {
+              const st = (r.status || '').toLowerCase();
+              return st === 'absent';
+            }).length;
+
+            const rateVal = totalSessions > 0 ? ((presentCount / totalSessions) * 100).toFixed(0) : "0";
+            const rateNum = Number(rateVal);
+            const rateColor = rateNum >= 80 ? '#059669' : rateNum >= 60 ? '#D97706' : '#DC2626';
+
+            const statTileStyle = {
+              background: '#F9FAFB',
+              border: '1px solid #E5E7EB',
+              borderRadius: 10,
+              padding: '12px',
+              textAlign: 'center'
+            };
+
+            const getStatusChip = (status) => {
+              const st = (status || '').toLowerCase();
+              if (st === 'present') {
+                return { bg: '#D1FAE5', color: '#065F46', text: 'Present' };
+              }
+              if (st === 'absent') {
+                return { bg: '#FEE2E2', color: '#991B1B', text: 'Absent' };
+              }
+              return { bg: '#FEF3C7', color: '#92400E', text: status || 'Late' };
+            };
+
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {/* 4 Stat Tiles */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gap: 8
+                }}>
+                  {/* Tile 1: TOTAL SESSIONS */}
+                  <div style={statTileStyle}>
+                    <div style={{ fontSize: 16, marginBottom: 2 }}>📅</div>
+                    <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                      TOTAL SESSIONS
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginTop: 2 }}>
+                      {totalSessions}
+                    </div>
+                  </div>
+
+                  {/* Tile 2: PRESENT */}
+                  <div style={statTileStyle}>
+                    <div style={{ fontSize: 16, marginBottom: 2 }}>✅</div>
+                    <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                      PRESENT
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#065F46', marginTop: 2 }}>
+                      {presentCount}
+                    </div>
+                  </div>
+
+                  {/* Tile 3: ABSENT */}
+                  <div style={statTileStyle}>
+                    <div style={{ fontSize: 16, marginBottom: 2 }}>❌</div>
+                    <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                      ABSENT
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#991B1B', marginTop: 2 }}>
+                      {absentCount}
+                    </div>
+                  </div>
+
+                  {/* Tile 4: RATE */}
+                  <div style={statTileStyle}>
+                    <div style={{ fontSize: 16, marginBottom: 2 }}>📊</div>
+                    <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                      RATE
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: rateColor, marginTop: 2 }}>
+                      {rateVal}%
+                    </div>
+                  </div>
+                </div>
+
+                {/* Attendance Log Table Card */}
+                <div style={{
+                  background: 'white',
+                  borderRadius: 12,
+                  border: '1px solid #E5E7EB',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1.2fr 2fr 1fr',
+                    padding: '10px 16px',
+                    background: '#F9FAFB',
+                    borderBottom: '1px solid #E5E7EB',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: '#6B7280',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.4px'
+                  }}>
+                    <div>DATE</div>
+                    <div>SESSION / SUBJECT</div>
+                    <div style={{ textAlign: 'right' }}>STATUS</div>
+                  </div>
+
+                  {sortedAttendance.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '32px', color: '#9CA3AF', fontSize: 13 }}>
+                      No attendance records yet
+                    </div>
+                  ) : (
+                    <div>
+                      {sortedAttendance.map((r, idx) => {
+                        const chip = getStatusChip(r.status);
+                        return (
+                          <div
+                            key={r.id || idx}
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1.2fr 2fr 1fr',
+                              alignItems: 'center',
+                              padding: '10px 16px',
+                              borderBottom: idx === sortedAttendance.length - 1 ? 'none' : '1px solid #F3F4F6',
+                              fontSize: 13,
+                              color: '#111827'
+                            }}
+                          >
+                            <div style={{ fontWeight: 500, fontSize: 12 }}>{r.date || '—'}</div>
+                            <div style={{ fontSize: 12, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {r.subjectName || r.subject || r.session || r.batchName || 'General Session'}
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <span
+                                style={{
+                                  background: chip.bg,
+                                  color: chip.color,
+                                  borderRadius: 20,
+                                  padding: '2px 10px',
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  display: 'inline-block'
+                                }}
+                              >
+                                {chip.text}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* SUBJECTS */}
-          {activeTab === "subjects" && (
-            <div>
-              <h4 style={{ fontSize: "0.95rem", marginBottom: "12px" }}>Enrolled Subjects</h4>
-              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                {student.subjects.map((sb, i) => (
-                  <span key={i} className="badge badge-info" style={{ fontSize: "0.88rem", padding: "8px 14px" }}>
-                    {sb}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+          {activeTab === "subjects" && (() => {
+            const subjectList = (() => {
+              const set = new Set();
+              if (Array.isArray(student.subjects)) {
+                student.subjects.forEach(s => {
+                  if (typeof s === 'string') set.add(s);
+                  else if (s && (s.name || s.subjectName)) set.add(s.name || s.subjectName);
+                });
+              }
+              if (Array.isArray(student.enrolledSubjects)) {
+                student.enrolledSubjects.forEach(s => {
+                  if (typeof s === 'string') set.add(s);
+                  else if (s && (s.name || s.subjectName)) set.add(s.name || s.subjectName);
+                });
+              }
+              enrolledBatches.forEach(b => {
+                (b.batchSubjects || []).forEach(bs => {
+                  if (bs.name || bs.subjectName) set.add(bs.name || bs.subjectName);
+                });
+              });
+              return Array.from(set).filter(Boolean);
+            })();
 
-          {/* MARKS */}
-          {activeTab === "marks" && (
-            <div className="table-container">
-              <table className="custom-table">
-                <thead>
-                  <tr>
-                    <th>Exam Name</th>
-                    <th>Subject</th>
-                    <th>Marks</th>
-                    <th>Percentage</th>
-                    <th>Grade</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>
-                      <strong>Mid-Term Evaluation 2026</strong>
-                    </td>
-                    <td>Business Studies</td>
-                    <td>88 / 100</td>
-                    <td>88%</td>
-                    <td>
-                      <span className="badge badge-success">A</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
+            const streamName = student?.stream || student?.streamName;
+
+            return (
+              <div style={{
+                background: 'white',
+                border: '1px solid #E5E7EB',
+                borderRadius: 12,
+                padding: 20
+              }}>
+                <div style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#6B7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.6px',
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: '1px solid #F3F4F6'
+                }}>
+                  📚 ENROLLED SUBJECTS
+                </div>
+
+                {subjectList.length === 0 ? (
+                  <div style={{ color: '#9CA3AF', fontSize: 13, padding: '16px 0', textAlign: 'center' }}>
+                    No subjects enrolled
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {subjectList.map((sb, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          background: '#EFF6FF',
+                          color: '#1D4ED8',
+                          border: '1px solid #BFDBFE',
+                          borderRadius: 20,
+                          padding: '5px 14px',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          margin: '4px 4px 4px 0'
+                        }}
+                      >
+                        📖 {sb}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {streamName && (
+                  <div style={{ fontSize: 12, color: '#6B7280', marginTop: 12, paddingTop: 10, borderTop: '1px solid #F3F4F6' }}>
+                    Stream: <strong style={{ color: '#111827' }}>{streamName}</strong>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* MARKS & GRADES */}
+          {activeTab === "marks" && (() => {
+            const allStoredMarks = safeLS('pba_marks', []) || [];
+            const allExams = data.exams || [];
+            const list = [];
+
+            allStoredMarks
+              .filter(m => (m.studentId || '').toString() === studentIdStr || (student.regNo && m.studentId === student.regNo))
+              .forEach(m => {
+                const exam = allExams.find(e => e.id === m.examId) || {};
+                const total = Number(m.totalMarks || exam.totalMarks || 100);
+                const score = Number(m.marksObtained ?? m.rawScore ?? 0);
+                const pct = m.percentage !== undefined ? Math.round(Number(m.percentage)) : Math.round((score / total) * 100);
+                const gr = m.grade || calcGrade(score, total);
+                list.push({
+                  id: m.id || `${m.examId}-${studentIdStr}`,
+                  examName: exam.name || m.examName || 'Assessment Exam',
+                  subject: m.subject || exam.subject || 'General Subject',
+                  marks: `${score} / ${total}`,
+                  percentage: Math.min(100, Math.max(0, pct)),
+                  grade: gr
+                });
+              });
+
+            allExams.forEach(ex => {
+              if (list.some(item => item.examName === ex.name)) return;
+              const res = (ex.results || []).find(r => (r.studentId || '').toString() === studentIdStr || (student.regNo && r.studentId === student.regNo));
+              if (res) {
+                const total = Number(ex.totalMarks || 100);
+                const score = Number(res.marks ?? 0);
+                const pct = Math.round((score / total) * 100);
+                const gr = res.grade || calcGrade(score, total);
+                list.push({
+                  id: `${ex.id}-${studentIdStr}`,
+                  examName: ex.name,
+                  subject: ex.subject || 'General Subject',
+                  marks: `${score} / ${total}`,
+                  percentage: Math.min(100, Math.max(0, pct)),
+                  grade: gr
+                });
+              }
+            });
+
+            const getGradeChipStyle = (grade) => {
+              const g = (grade || '').toUpperCase();
+              if (g.startsWith('A')) return { background: '#D1FAE5', color: '#065F46' };
+              if (g.startsWith('B')) return { background: '#DBEAFE', color: '#1D4ED8' };
+              if (g.startsWith('C')) return { background: '#FEF3C7', color: '#92400E' };
+              return { background: '#FEE2E2', color: '#991B1B' };
+            };
+
+            const getBarColor = (pct) => {
+              if (pct >= 75) return '#22C55E';
+              if (pct >= 50) return '#F59E0B';
+              return '#EF4444';
+            };
+
+            return (
+              <div style={{
+                background: 'white',
+                border: '1px solid #E5E7EB',
+                borderRadius: 12,
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '2fr 1.5fr 1fr 1.5fr 1fr',
+                  background: '#F9FAFB',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#6B7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.4px',
+                  padding: '10px 16px',
+                  borderBottom: '1px solid #E5E7EB'
+                }}>
+                  <div>EXAM</div>
+                  <div>SUBJECT</div>
+                  <div>MARKS</div>
+                  <div>%</div>
+                  <div style={{ textAlign: 'right' }}>GRADE</div>
+                </div>
+
+                {list.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '32px', color: '#9CA3AF', fontSize: 13 }}>
+                    No marks recorded yet
+                  </div>
+                ) : (
+                  <div>
+                    {list.map((item, idx) => {
+                      const grStyle = getGradeChipStyle(item.grade);
+                      const barColor = getBarColor(item.percentage);
+                      return (
+                        <div
+                          key={item.id || idx}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '2fr 1.5fr 1fr 1.5fr 1fr',
+                            alignItems: 'center',
+                            padding: '10px 16px',
+                            borderBottom: idx === list.length - 1 ? 'none' : '1px solid #F3F4F6',
+                            fontSize: 13,
+                            color: '#111827'
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.examName}
+                          </div>
+                          <div style={{ fontSize: 12, color: '#4B5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.subject}
+                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 500 }}>
+                            {item.marks}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 600 }}>{item.percentage}%</div>
+                            <div style={{
+                              height: 3,
+                              borderRadius: 4,
+                              marginTop: 3,
+                              background: '#E5E7EB',
+                              width: '80px',
+                              overflow: 'hidden'
+                            }}>
+                              <div style={{
+                                width: `${item.percentage}%`,
+                                height: '100%',
+                                background: barColor,
+                                borderRadius: 4
+                              }} />
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{
+                              ...grStyle,
+                              borderRadius: 20,
+                              padding: '2px 10px',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              display: 'inline-block'
+                            }}>
+                              {item.grade}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* DISCIPLINE */}
-          {activeTab === "discipline" && (
-            <div className="table-container">
-              <table className="custom-table">
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Date Issued</th>
-                    <th>Reason</th>
-                    <th>Issued By</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {studentDiscipline.map((d) => (
-                    <tr key={d.id}>
-                      <td>
-                        <span className="badge badge-danger">{d.type}</span>
-                      </td>
-                      <td>{d.dateIssued}</td>
-                      <td>{d.reason}</td>
-                      <td>{d.issuedBy}</td>
-                    </tr>
-                  ))}
-                  {studentDiscipline.length === 0 && (
-                    <tr>
-                      <td colSpan="4" style={{ textAlign: "center", color: "#059669" }}>
-                        Clean record! No disciplinary actions logged.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {activeTab === "discipline" && (() => {
+            const storedDiscipline = (safeLS('pba_discipline_records', []) || [])
+              .filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr);
+            const fallbackDiscipline = (safeLS('pba_discipline', []) || [])
+              .filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr);
 
-          {/* FEES */}
-          {activeTab === "fees" && (
-            <div className="table-container">
-              <table className="custom-table">
-                <thead>
-                  <tr>
-                    <th>Description</th>
-                    <th>Due Date</th>
-                    <th>Amount Due</th>
-                    <th>Paid</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {studentFees.map((f) => (
-                    <tr key={f.id}>
-                      <td>
-                        <strong>{f.description}</strong>
-                      </td>
-                      <td>{f.dueDate}</td>
-                      <td>LKR {f.amountDue.toLocaleString()}</td>
-                      <td>LKR {(f.amountPaid || 0).toLocaleString()}</td>
-                      <td>
-                        <span className={`badge ${f.status === "Paid" ? "badge-success" : "badge-danger"}`}>{f.status}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+            const allDiscipline = storedDiscipline.length > 0
+              ? storedDiscipline
+              : fallbackDiscipline.length > 0
+                ? fallbackDiscipline
+                : studentDiscipline;
+
+            const getSeverityStyle = (sev, type) => {
+              const s = (sev || type || '').toLowerCase();
+              if (s.includes('suspension') || s.includes('critical') || s.includes('severe')) {
+                return { background: '#FEE2E2', color: '#991B1B', label: sev || 'Suspension' };
+              }
+              if (s.includes('warning') || s.includes('moderate')) {
+                return { background: '#FEF3C7', color: '#92400E', label: sev || 'Warning' };
+              }
+              return { background: '#F3F4F6', color: '#374151', label: sev || 'Note' };
+            };
+
+            return (
+              <div style={{
+                background: 'white',
+                border: '1px solid #E5E7EB',
+                borderRadius: 12,
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1.2fr 2fr 1fr',
+                  background: '#F9FAFB',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#6B7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.4px',
+                  padding: '10px 16px',
+                  borderBottom: '1px solid #E5E7EB'
+                }}>
+                  <div>DATE</div>
+                  <div>TYPE</div>
+                  <div>DESCRIPTION</div>
+                  <div style={{ textAlign: 'right' }}>SEVERITY</div>
+                </div>
+
+                {allDiscipline.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '32px', color: '#9CA3AF', fontSize: 13 }}>
+                    No discipline records
+                  </div>
+                ) : (
+                  <div>
+                    {allDiscipline.map((d, idx) => {
+                      const sevChip = getSeverityStyle(d.severity, d.type);
+                      return (
+                        <div
+                          key={d.id || idx}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1.2fr 2fr 1fr',
+                            alignItems: 'center',
+                            padding: '10px 16px',
+                            borderBottom: idx === allDiscipline.length - 1 ? 'none' : '1px solid #F3F4F6',
+                            fontSize: 13,
+                            color: '#111827'
+                          }}
+                        >
+                          <div style={{ fontSize: 12, color: '#6B7280' }}>
+                            {d.date || d.dateIssued || '—'}
+                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>
+                            {d.type || 'Incident'}
+                          </div>
+                          <div style={{ fontSize: 12, color: '#4B5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {d.description || d.reason || '—'}
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{
+                              background: sevChip.background,
+                              color: sevChip.color,
+                              borderRadius: 20,
+                              padding: '2px 10px',
+                              fontSize: 11,
+                              fontWeight: 600,
+                              display: 'inline-block'
+                            }}>
+                              {sevChip.label}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* FEES LEDGER */}
+          {activeTab === "fees" && (() => {
+            const storedLedger = (safeLS('pba_fee_ledger', []) || [])
+              .filter(e => (e.studentId || e.regNo || '').toString() === studentIdStr || (student.regNo && (e.studentId || e.regNo) === student.regNo));
+
+            const allFeeEntries = storedLedger.length > 0 ? storedLedger : studentFees.map(f => ({
+              id: f.id,
+              description: f.description,
+              batchName: student.batch || 'Main Batch',
+              dueDate: f.dueDate,
+              amount: f.amountDue,
+              amountPaid: f.amountPaid || 0,
+              balance: Math.max(0, (f.amountDue || 0) - (f.amountPaid || 0)),
+              status: f.status
+            }));
+
+            const getStatusChip = (st) => {
+              const s = (st || '').toLowerCase();
+              if (s === 'paid') return { bg: '#D1FAE5', color: '#065F46', text: 'Paid', bold: false };
+              if (s === 'partial') return { bg: '#FEF3C7', color: '#92400E', text: 'Partial', bold: false };
+              if (s === 'overdue') return { bg: '#FEE2E2', color: '#991B1B', text: 'Overdue', bold: true };
+              return { bg: '#FEE2E2', color: '#991B1B', text: st || 'Unpaid', bold: false };
+            };
+
+            return (
+              <div style={{
+                background: 'white',
+                border: '1px solid #E5E7EB',
+                borderRadius: 12,
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1.8fr 1fr 1fr 1fr 1fr 1fr 1fr',
+                  background: '#F9FAFB',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: '#6B7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.4px',
+                  padding: '10px 14px',
+                  borderBottom: '1px solid #E5E7EB'
+                }}>
+                  <div>DESCRIPTION</div>
+                  <div>BATCH</div>
+                  <div>DUE DATE</div>
+                  <div>AMOUNT</div>
+                  <div>PAID</div>
+                  <div>BALANCE</div>
+                  <div style={{ textAlign: 'right' }}>STATUS</div>
+                </div>
+
+                {allFeeEntries.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '32px 20px', color: '#9CA3AF', fontSize: 13, lineHeight: 1.5 }}>
+                    No fee ledger entries yet. Add a fee structure to this student's batch to generate entries.
+                  </div>
+                ) : (
+                  <div>
+                    {allFeeEntries.map((e, idx) => {
+                      const chip = getStatusChip(e.status);
+                      const amt = Number(e.amount || e.amountDue || 0);
+                      const paid = Number(e.amountPaid || 0);
+                      const bal = Number(e.balance ?? Math.max(0, amt - paid));
+                      return (
+                        <div
+                          key={e.id || idx}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1.8fr 1fr 1fr 1fr 1fr 1fr 1fr',
+                            alignItems: 'center',
+                            padding: '10px 14px',
+                            borderBottom: idx === allFeeEntries.length - 1 ? 'none' : '1px solid #F3F4F6',
+                            fontSize: 12,
+                            color: '#111827'
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {e.description || e.feeStructureName || 'Fee Instalment'}
+                          </div>
+                          <div style={{ color: '#4B5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {e.batchName || e.batch || '—'}
+                          </div>
+                          <div style={{ color: '#6B7280' }}>
+                            {e.dueDate || '—'}
+                          </div>
+                          <div style={{ fontWeight: 500 }}>
+                            {amt.toLocaleString()}
+                          </div>
+                          <div style={{ color: '#059669', fontWeight: 500 }}>
+                            {paid.toLocaleString()}
+                          </div>
+                          <div style={{ color: bal > 0 ? '#DC2626' : '#6B7280', fontWeight: 600 }}>
+                            {bal.toLocaleString()}
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{
+                              background: chip.bg,
+                              color: chip.color,
+                              borderRadius: 20,
+                              padding: '2px 8px',
+                              fontSize: 10,
+                              fontWeight: chip.bold ? 700 : 600,
+                              display: 'inline-block'
+                            }}>
+                              {chip.text}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* DOCUMENTS */}
+          {activeTab === "documents" && (() => {
+            const storedDocs = (safeLS('pba_student_documents', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr);
+            const fallbackDocs = (safeLS('pba_documents', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr);
+            const allDocs = storedDocs.length > 0 ? storedDocs : fallbackDocs.length > 0 ? fallbackDocs : studentDocs;
+
+            return (
+              <div style={{
+                background: 'white',
+                border: '1px solid #E5E7EB',
+                borderRadius: 12,
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '2fr 1fr 1fr',
+                  background: '#F9FAFB',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#6B7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.4px',
+                  padding: '10px 16px',
+                  borderBottom: '1px solid #E5E7EB'
+                }}>
+                  <div>DOCUMENT TITLE</div>
+                  <div>TYPE</div>
+                  <div style={{ textAlign: 'right' }}>UPLOAD DATE</div>
+                </div>
+
+                {allDocs.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '32px', color: '#9CA3AF', fontSize: 13 }}>
+                    No documents uploaded
+                  </div>
+                ) : (
+                  <div>
+                    {allDocs.map((doc, idx) => (
+                      <div
+                        key={doc.id || idx}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '2fr 1fr 1fr',
+                          alignItems: 'center',
+                          padding: '10px 16px',
+                          borderBottom: idx === allDocs.length - 1 ? 'none' : '1px solid #F3F4F6',
+                          fontSize: 13,
+                          color: '#111827'
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, fontSize: 12 }}>
+                          📄 {doc.title || doc.name || 'Document'}
+                        </div>
+                        <div>
+                          <span style={{
+                            background: '#F3F4F6',
+                            color: '#4B5563',
+                            borderRadius: 16,
+                            padding: '2px 8px',
+                            fontSize: 11,
+                            fontWeight: 500
+                          }}>
+                            {doc.type || 'General'}
+                          </span>
+                        </div>
+                        <div style={{ textAlign: 'right', fontSize: 12, color: '#6B7280' }}>
+                          {doc.uploadDate || doc.date || '—'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* REPORT CARD */}
           {activeTab === "report" && (
@@ -1002,6 +1642,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                     style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #CBD5E0', fontSize: '12px' }}
                   />
                   <button
+                    type="button"
                     onClick={() => { setFromDate(''); setToDate(''); }}
                     style={{ padding: '5px 12px', background: '#FFFFFF', border: '1px solid #CBD5E0', borderRadius: '6px', fontSize: '12px', fontWeight: 600, color: '#4A5568', cursor: 'pointer' }}
                   >
@@ -1010,6 +1651,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => window.print()}
                   style={{
                     padding: '10px 20px',
@@ -1040,8 +1682,8 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                 const allExams = data.exams || [];
                 const filteredExams = allExams.filter((ex) => {
                   if (ex.batch !== "All" && ex.batch !== student.batch) return false;
-                  if (fromDate && new Date(ex.date) < new Date(fromDate)) return false;
-                  if (toDate && new Date(ex.date) > new Date(toDate)) return false;
+                  if (fromDate && parseDate3Arg(ex.date) && parseDate3Arg(fromDate) && parseDate3Arg(ex.date) < parseDate3Arg(fromDate)) return false;
+                  if (toDate && parseDate3Arg(ex.date) && parseDate3Arg(toDate) && parseDate3Arg(ex.date) > parseDate3Arg(toDate)) return false;
                   return true;
                 });
 
@@ -1269,39 +1911,6 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
               })()}
             </div>
           )}
-          {activeTab === "documents" && (
-            <div className="table-container">
-              <table className="custom-table">
-                <thead>
-                  <tr>
-                    <th>Document Title</th>
-                    <th>Type</th>
-                    <th>Upload Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {studentDocs.map((doc) => (
-                    <tr key={doc.id}>
-                      <td>
-                        <strong>{doc.title}</strong>
-                      </td>
-                      <td>
-                        <span className="badge badge-neutral">{doc.type}</span>
-                      </td>
-                      <td>{doc.uploadDate}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>
-            Close Drawer
-          </button>
         </div>
       </div>
 
@@ -1552,6 +2161,6 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
           </div>
         );
       })()}
-    </div>
+    </>
   );
 };
