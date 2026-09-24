@@ -21,6 +21,13 @@ const saveLS = (key, val) => {
   catch (err) { console.error('saveLS error:', err); }
 };
 
+const formatOrdinal = (day) => {
+  const d = parseInt(day) || 10;
+  const s = ["th", "st", "nd", "rd"];
+  const v = d % 100;
+  return d + (s[(v - 20) % 10] || s[v] || s[0]);
+};
+
 export const FeeManagementView = ({ isMobile }) => {
   const isMobileState = isMobile !== undefined ? isMobile : (window.innerWidth < 768);
   const { data, recordFeePayment, exportToCSV, showToast } = useApp();
@@ -43,7 +50,17 @@ export const FeeManagementView = ({ isMobile }) => {
   const [feeStructureModal, setFeeStructureModal] = useState(false);
   const [editingFeeStructure, setEditingFeeStructure] = useState(null);
   const [feeStructureForm, setFeeStructureForm] = useState({
-    batchId: '', feeName: '', amount: '', frequency: 'Monthly', mandatory: true
+    batchId:         '',
+    feeName:         '',
+    amount:          '',
+    frequency:       'Monthly',
+    mandatory:       true,
+    dueDay:          10,
+    gracePeriod:     5,
+    lateFee:         0,
+    effectiveFrom:   new Date().toISOString().slice(0, 7), // "YYYY-MM"
+    allowInstalment: false,
+    notes:           '',
   });
   const [fsRefresh, setFsRefresh] = useState(0);
 
@@ -51,15 +68,33 @@ export const FeeManagementView = ({ isMobile }) => {
     if (existing) {
       setEditingFeeStructure(existing);
       setFeeStructureForm({
-        batchId:   existing.batchId   || '',
-        feeName:   existing.feeName   || '',
-        amount:    existing.amount    || '',
-        frequency: existing.frequency || 'Monthly',
-        mandatory: existing.mandatory !== false
+        batchId:         existing.batchId         || '',
+        feeName:         existing.feeName         || existing.name || '',
+        amount:          existing.amount          ?? '',
+        frequency:       existing.frequency       || 'Monthly',
+        mandatory:       existing.mandatory       !== false,
+        dueDay:          existing.dueDay          ?? 10,
+        gracePeriod:     existing.gracePeriod     ?? 5,
+        lateFee:         existing.lateFee         ?? 0,
+        effectiveFrom:   existing.effectiveFrom   || new Date().toISOString().slice(0, 7),
+        allowInstalment: existing.allowInstalment ?? false,
+        notes:           existing.notes           || '',
       });
     } else {
       setEditingFeeStructure(null);
-      setFeeStructureForm({ batchId: '', feeName: '', amount: '', frequency: 'Monthly', mandatory: true });
+      setFeeStructureForm({
+        batchId:         '',
+        feeName:         '',
+        amount:          '',
+        frequency:       'Monthly',
+        mandatory:       true,
+        dueDay:          10,
+        gracePeriod:     5,
+        lateFee:         0,
+        effectiveFrom:   new Date().toISOString().slice(0, 7),
+        allowInstalment: false,
+        notes:           '',
+      });
     }
     setFeeStructureModal(true);
   };
@@ -73,19 +108,28 @@ export const FeeManagementView = ({ isMobile }) => {
     const batch = allBatches.find(b => b.id === feeStructureForm.batchId);
     const batchName = batch?.name || feeStructureForm.batchId;
     const existing = safeLS('pba_fee_structures', []) || [];
+    const structPayload = {
+      ...feeStructureForm,
+      batchName,
+      amount:          parseFloat(feeStructureForm.amount) || 0,
+      dueDay:          parseInt(feeStructureForm.dueDay) || 10,
+      gracePeriod:     feeStructureForm.gracePeriod === '' ? 5 : (parseInt(feeStructureForm.gracePeriod) ?? 5),
+      lateFee:         parseFloat(feeStructureForm.lateFee) || 0,
+      effectiveFrom:   feeStructureForm.effectiveFrom || new Date().toISOString().slice(0, 7),
+      allowInstalment: !!feeStructureForm.allowInstalment,
+      notes:           feeStructureForm.notes || '',
+    };
     let updated;
     if (editingFeeStructure) {
       updated = existing.map(fs =>
         fs.id === editingFeeStructure.id
-          ? { ...fs, ...feeStructureForm, batchName, amount: parseFloat(feeStructureForm.amount) || 0 }
+          ? { ...fs, ...structPayload }
           : fs
       );
     } else {
       updated = [...existing, {
         id: Date.now().toString(),
-        ...feeStructureForm,
-        batchName,
-        amount: parseFloat(feeStructureForm.amount) || 0
+        ...structPayload,
       }];
     }
     saveLS('pba_fee_structures', updated);
@@ -132,11 +176,44 @@ export const FeeManagementView = ({ isMobile }) => {
         (e.studentId || '').toString() === studentIdStr &&
         e.batchId === batch.id
       );
+
+      const today = new Date();
+      const dueDay = feeStruct.dueDay || 10;
+      const dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
+      // If that day has already passed this month, due date is next month
+      if (dueDate < today) {
+        dueDate.setMonth(dueDate.getMonth() + 1);
+      }
+      const dueDateStr = `${dueDate.getFullYear()}-${
+        String(dueDate.getMonth() + 1).padStart(2, '0')}-${
+        String(dueDay).padStart(2, '0')}`;
+
+      const gracePeriod = feeStruct.gracePeriod ?? 5;
+      const overdueDate = new Date(dueDate);
+      overdueDate.setDate(overdueDate.getDate() + gracePeriod);
+
       if (existing) {
-        derivedLedger.push({ ...existing, studentName, batchName: batch.name || existing.batchName });
+        let isOverdue = existing.isOverdue;
+        if (existing.dueDate) {
+          const d = new Date(existing.dueDate);
+          const entryOverdueDate = new Date(d);
+          entryOverdueDate.setDate(entryOverdueDate.getDate() + gracePeriod);
+          isOverdue = existing.status !== 'Paid' && today > entryOverdueDate;
+        } else {
+          isOverdue = existing.status !== 'Paid' && today > overdueDate;
+        }
+        derivedLedger.push({
+          ...existing,
+          isOverdue,
+          studentName,
+          batchName: batch.name || existing.batchName,
+          allowInstalment: feeStruct.allowInstalment ?? existing.allowInstalment ?? false,
+          dueDay,
+          gracePeriod,
+          lateFee: feeStruct.lateFee || 0,
+        });
       } else {
-        const today = new Date();
-        const dueDateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-10`;
+        const isOverdue = today > overdueDate;
         derivedLedger.push({
           id:          `${studentIdStr}_${batch.id}`,
           studentId:   studentIdStr,
@@ -150,7 +227,11 @@ export const FeeManagementView = ({ isMobile }) => {
           balance:     feeStruct.amount  || 0,
           dueDate:     dueDateStr,
           status:      'Unpaid',
-          isOverdue:   false,
+          isOverdue,
+          allowInstalment: feeStruct.allowInstalment ?? false,
+          dueDay,
+          gracePeriod,
+          lateFee:     feeStruct.lateFee || 0,
         });
       }
     });
@@ -208,6 +289,16 @@ export const FeeManagementView = ({ isMobile }) => {
   const handleSavePayment = (e) => {
     e.preventDefault();
     if (!paymentModalFee || !payForm.amount) return;
+    const balance = paymentModalFee.balance ?? ((paymentModalFee.amountDue || paymentModalFee.amount || 0) - (paymentModalFee.amountPaid || 0));
+    const amountVal = parseFloat(payForm.amount) || 0;
+    if (paymentModalFee.allowInstalment === false && amountVal < balance) {
+      alert(`Full payment of LKR ${balance.toLocaleString()} is required for this fee structure.`);
+      return;
+    }
+    if (amountVal > balance) {
+      alert(`Payment amount cannot exceed the outstanding balance of LKR ${balance.toLocaleString()}.`);
+      return;
+    }
     recordPayment(paymentModalFee.id, payForm.amount);
     setPaymentModalFee(null);
   };
@@ -650,13 +741,16 @@ export const FeeManagementView = ({ isMobile }) => {
           </div>
 
           <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "12px" }}>
-            <table style={{ minWidth: "700px", width: "100%", borderCollapse: "collapse" }}>
+            <table style={{ minWidth: "850px", width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#F8F9FA" }}>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Batch</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Fee Name</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Amount (LKR)</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Frequency</th>
+                  <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Due Day</th>
+                  <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Grace</th>
+                  <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Late Fee</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Mandatory</th>
                   <th style={{ padding: '10px 16px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', borderBottom: '2px solid ' + theme.cardBorder, textAlign: 'left', whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
@@ -664,7 +758,7 @@ export const FeeManagementView = ({ isMobile }) => {
               <tbody>
                 {feeStructures.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: '32px', color: '#9CA3AF', fontSize: '14px' }}>
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '32px', color: '#9CA3AF', fontSize: '14px' }}>
                       No fee structures yet. Click "+ Add Fee Structure" to create one.
                     </td>
                   </tr>
@@ -686,6 +780,17 @@ export const FeeManagementView = ({ isMobile }) => {
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
                       {fs.frequency}
+                    </td>
+                    <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
+                      {formatOrdinal(fs.dueDay || 10)}
+                    </td>
+                    <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
+                      {(fs.gracePeriod !== undefined && fs.gracePeriod !== null ? fs.gracePeriod : 5) > 0
+                        ? `${fs.gracePeriod !== undefined && fs.gracePeriod !== null ? fs.gracePeriod : 5} days`
+                        : 'None'}
+                    </td>
+                    <td style={{ padding: '13px 16px', fontSize: '13px', color: theme.textSecondary, borderBottom: '1px solid #F4F5F7' }}>
+                      {fs.lateFee ? `LKR ${Number(fs.lateFee).toLocaleString()}` : '—'}
                     </td>
                     <td style={{ padding: '13px 16px', borderBottom: '1px solid #F4F5F7' }}>
                       {fs.mandatory !== false ? (
@@ -716,8 +821,8 @@ export const FeeManagementView = ({ isMobile }) => {
 
       {/* Fee Structure Create/Edit Modal */}
       {feeStructureModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ background: 'white', borderRadius: '16px', padding: '28px 32px', width: '480px', maxWidth: '90vw', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px 12px' }}>
+          <div style={{ background: 'white', borderRadius: '16px', padding: '28px 32px', width: '520px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#111827' }}>
@@ -753,43 +858,143 @@ export const FeeManagementView = ({ isMobile }) => {
               />
             </div>
 
-            {/* Amount */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Amount (LKR) *</label>
-              <input
-                type='number'
-                placeholder='e.g. 15000'
-                value={feeStructureForm.amount}
-                onChange={e => setFeeStructureForm(f => ({ ...f, amount: e.target.value }))}
-                style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', boxSizing: 'border-box' }}
-              />
+            {/* Amount & Frequency */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Amount (LKR) *</label>
+                <input
+                  type='number'
+                  placeholder='e.g. 15000'
+                  value={feeStructureForm.amount}
+                  onChange={e => setFeeStructureForm(f => ({ ...f, amount: e.target.value }))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Frequency</label>
+                <select
+                  value={feeStructureForm.frequency}
+                  onChange={e => setFeeStructureForm(f => ({ ...f, frequency: e.target.value }))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', background: 'white', boxSizing: 'border-box' }}
+                >
+                  <option>Monthly</option>
+                  <option>Per Term</option>
+                  <option>Annual</option>
+                  <option>One-time</option>
+                </select>
+              </div>
             </div>
 
-            {/* Frequency */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Frequency</label>
-              <select
-                value={feeStructureForm.frequency}
-                onChange={e => setFeeStructureForm(f => ({ ...f, frequency: e.target.value }))}
-                style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', background: 'white', boxSizing: 'border-box' }}
-              >
-                <option>Monthly</option>
-                <option>Per Term</option>
-                <option>Annual</option>
-                <option>One-time</option>
-              </select>
+            {/* FIELD 1: Due Day of Month & FIELD 2: Grace Period */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Due Day of Month</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="28"
+                  placeholder="e.g. 10"
+                  value={feeStructureForm.dueDay}
+                  onChange={e => setFeeStructureForm(f =>
+                    ({ ...f, dueDay: parseInt(e.target.value) || 10 }))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', boxSizing: 'border-box' }}
+                />
+                <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '4px' }}>
+                  Fee is due on this day each month (e.g. 10 = 10th of every month)
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Grace Period (days)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="30"
+                  placeholder="e.g. 5"
+                  value={feeStructureForm.gracePeriod}
+                  onChange={e => setFeeStructureForm(f =>
+                    ({ ...f, gracePeriod: parseInt(e.target.value) || 0 }))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', boxSizing: 'border-box' }}
+                />
+                <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '4px' }}>
+                  Days after due date before marked as Overdue (0 = immediate)
+                </div>
+              </div>
             </div>
 
-            {/* Mandatory */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}>
-              <input
-                type='checkbox'
-                id='fsMandatory'
-                checked={feeStructureForm.mandatory}
-                onChange={e => setFeeStructureForm(f => ({ ...f, mandatory: e.target.checked }))}
-                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+            {/* FIELD 3: Late Fee & FIELD 4: Effective From */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Late Fee (LKR, 0 = none)</label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="e.g. 500"
+                  value={feeStructureForm.lateFee}
+                  onChange={e => setFeeStructureForm(f =>
+                    ({ ...f, lateFee: parseFloat(e.target.value) || 0 }))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', boxSizing: 'border-box' }}
+                />
+                <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '4px' }}>
+                  Added to the balance once the grace period expires
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Effective From</label>
+                <input
+                  type="month"
+                  value={feeStructureForm.effectiveFrom}
+                  onChange={e => setFeeStructureForm(f =>
+                    ({ ...f, effectiveFrom: e.target.value }))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', boxSizing: 'border-box', background: 'white' }}
+                />
+                <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '4px' }}>
+                  Month from which this fee amount applies
+                </div>
+              </div>
+            </div>
+
+            {/* FIELD 5: Allow Instalment & Mandatory */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <input
+                  type='checkbox'
+                  id='fsMandatory'
+                  checked={feeStructureForm.mandatory}
+                  onChange={e => setFeeStructureForm(f => ({ ...f, mandatory: e.target.checked }))}
+                  style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                />
+                <label htmlFor='fsMandatory' style={{ fontSize: '14px', fontWeight: 500, color: '#374151', cursor: 'pointer' }}>Mandatory fee</label>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <input
+                  type="checkbox"
+                  id="fsInstalment"
+                  checked={feeStructureForm.allowInstalment}
+                  onChange={e => setFeeStructureForm(f =>
+                    ({ ...f, allowInstalment: e.target.checked }))}
+                  style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                />
+                <label htmlFor="fsInstalment" style={{ fontSize: '14px', fontWeight: 500, color: '#374151', cursor: 'pointer' }}>
+                  Allow partial/instalment payments
+                </label>
+              </div>
+            </div>
+
+            {/* FIELD 6: Notes */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Notes (optional)</label>
+              <textarea
+                rows={2}
+                placeholder="e.g. Includes lab fee and study materials"
+                value={feeStructureForm.notes}
+                onChange={e => setFeeStructureForm(f =>
+                  ({ ...f, notes: e.target.value }))}
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '14px', color: '#111827', boxSizing: 'border-box', resize: 'vertical', minHeight: '60px', fontFamily: "'Inter', 'Segoe UI', sans-serif" }}
               />
-              <label htmlFor='fsMandatory' style={{ fontSize: '14px', fontWeight: 500, color: '#374151', cursor: 'pointer' }}>Mandatory fee</label>
             </div>
 
             {/* Actions */}
@@ -833,12 +1038,15 @@ export const FeeManagementView = ({ isMobile }) => {
                 <input
                   type="number"
                   required
+                  min="1"
+                  max={paymentModalFee.balance ?? ((paymentModalFee.amountDue || paymentModalFee.amount || 0) - (paymentModalFee.amountPaid || 0))}
+                  readOnly={paymentModalFee.allowInstalment === false}
                   value={payForm.amount}
                   onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
                   style={{
                     width: '100%',
                     padding: '9px 13px',
-                    background: '#FFFFFF',
+                    background: paymentModalFee.allowInstalment === false ? '#F9FAFB' : '#FFFFFF',
                     border: '1.5px solid #E3E6EA',
                     borderRadius: '8px',
                     fontSize: '13px',
@@ -846,11 +1054,17 @@ export const FeeManagementView = ({ isMobile }) => {
                     outline: 'none',
                     fontFamily: "'Inter', 'Segoe UI', sans-serif",
                     transition: 'border-color 0.15s, box-shadow 0.15s',
-                    boxSizing: 'border-box'
+                    boxSizing: 'border-box',
+                    cursor: paymentModalFee.allowInstalment === false ? 'not-allowed' : 'text'
                   }}
                   onFocus={e => { e.target.style.borderColor = '#2B6CB0'; e.target.style.boxShadow = '0 0 0 3px rgba(43,108,176,0.12)'; }}
                   onBlur={e => { e.target.style.borderColor = '#E3E6EA'; e.target.style.boxShadow = 'none'; }}
                 />
+                {paymentModalFee.allowInstalment === false && (
+                  <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '4px' }}>
+                    Full payment required for this fee structure (instalments disabled)
+                  </div>
+                )}
               </div>
 
               <div style={{ marginBottom: '16px' }}>
