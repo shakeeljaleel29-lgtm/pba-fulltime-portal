@@ -55,6 +55,19 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
   const [toDate, setToDate] = useState("");
   const [adminNotes, setAdminNotes] = useState(student?.adminNotes || "");
   const [profileRefresh, setProfileRefresh] = useState(0);
+  const [batchRefresh, setBatchRefresh] = useState(0);
+
+  const studentIdStr = (
+    student?.id || student?.regNo || student?.studentId || ''
+  ).toString();
+
+  const enrolledBatches = React.useMemo(() => {
+    return (safeLS('pba_batches', []) || []).filter(b =>
+      (b.students || []).some(s =>
+        (s.id || s.regNo || s.studentId || '').toString() === studentIdStr
+      )
+    );
+  }, [studentIdStr, batchRefresh]);
 
   useEffect(() => {
     if (initialTab) {
@@ -97,21 +110,19 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
     try {
       const allBatches = safeLS('pba_batches', []);
       const updatedBatches = (allBatches || []).map(b => {
-        if (b.name === batchNameOrId || b.id === batchNameOrId) {
-          return {
-            ...b,
-            students: (b.students || []).filter(s =>
-              (s.id || s.regNo || '').toString() !== (student?.id || student?.regNo || '').toString()
-            )
-          };
-        }
-        return b;
+        if (b.id !== batchNameOrId && b.name !== batchNameOrId) return b;
+        return {
+          ...b,
+          students: (b.students || []).filter(s =>
+            (s.id || s.regNo || s.studentId || '').toString() !== studentIdStr
+          )
+        };
       });
       saveLS('pba_batches', updatedBatches);
 
       const allEnrollments = safeLS('pba_batch_enrollments', []);
       const updatedEnrollments = (allEnrollments || []).filter(e =>
-        !((e.studentId === student?.id || e.regNo === student?.regNo) &&
+        !(((e.studentId || e.regNo || '').toString() === studentIdStr) &&
           (e.batchName === batchNameOrId || e.batchId === batchNameOrId))
       );
       saveLS('pba_batch_enrollments', updatedEnrollments);
@@ -124,6 +135,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
         if (student.batchName === batchNameOrId) student.batchName = '';
         if (student.batchId === batchNameOrId) student.batchId = '';
       }
+      setBatchRefresh(r => r + 1);
       setProfileRefresh(prev => prev + 1);
     } catch (err) {
       console.error("Error unenrolling batch:", err);
@@ -228,21 +240,84 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
   ];
 
   const isMobileState = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+  const isNarrowDrawer = isMobileState || (typeof window !== 'undefined' && window.innerWidth < 640);
+
+  const rawStatus = (student?.status || 'Active').trim();
+  const statusLower = rawStatus.toLowerCase();
+  const heroStatusBg = statusLower === 'withdrawn' ? '#EF4444' : statusLower === 'completed' ? '#6B7280' : '#22C55E';
+  const heroStatusText = statusLower === 'withdrawn' ? 'Withdrawn' : statusLower === 'completed' ? 'Completed' : 'Active';
+
+  const acadPillBg = statusLower === 'withdrawn' ? '#FEE2E2' : statusLower === 'completed' ? '#F3F4F6' : '#D1FAE5';
+  const acadPillColor = statusLower === 'withdrawn' ? '#991B1B' : statusLower === 'completed' ? '#374151' : '#065F46';
 
   return (
     <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(10,15,28,0.55)', backdropFilter: 'blur(4px)', zIndex: 1050, display: 'flex', alignItems: isMobileState ? 'flex-start' : 'center', justifyContent: 'center', padding: isMobileState ? '10px 8px' : '0', overflowY: 'auto' }}>
       <div className="modal-card modal-card-lg" style={{ width: isMobileState ? '98vw' : '880px', maxWidth: '98vw', height: "90vh", maxHeight: '92vh', overflowY: 'auto', margin: isMobileState ? '10px auto' : 'auto' }}>
-        {/* Header */}
-        <div className="modal-header" style={{ backgroundColor: "#1A3566", color: "#FFFFFF" }}>
-          <div>
-            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#FFFFFF" }}>
-              {student.name} <span style={{ fontSize: "0.85rem", color: "#93C5FD" }}>({student.regNo})</span>
-            </h3>
-            <div style={{ fontSize: "0.78rem", color: "#CBD5E1" }}>
-              {(resolveBatchName(student.batch || student.batchId || student.batchName) || student.batch || "No batch assigned")} • {student.branch || "Kohuwala"} Branch
+        {/* SECTION 1 — Compact Hero Strip (replaces current top header) */}
+        <div style={{
+          background: 'linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)',
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          borderTopLeftRadius: '14px',
+          borderTopRightRadius: '14px',
+          flexWrap: isNarrowDrawer ? 'wrap' : 'nowrap'
+        }}>
+          {/* Left: initials avatar */}
+          <div style={{
+            width: '48px',
+            height: '48px',
+            borderRadius: '50%',
+            background: 'rgba(255,255,255,0.2)',
+            border: '2px solid rgba(255,255,255,0.3)',
+            fontSize: '16px',
+            fontWeight: 700,
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            {getInitials(student.name)}
+          </div>
+
+          {/* Centre (flex: 1) */}
+          <div style={{ flex: 1, minWidth: isNarrowDrawer ? '100%' : '180px' }}>
+            <div style={{ fontSize: '17px', fontWeight: 700, color: 'white' }}>
+              {student.name}
+            </div>
+            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.75)', marginTop: '2px' }}>
+              {student.regNo || student.id || 'No Reg No'}
+            </div>
+            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.75)', marginTop: '2px' }}>
+              {(enrolledBatches[0]?.name || resolveBatchName(student.batch || student.batchId || student.batchName) || student.batch || 'No batch assigned')}
+              {student.branch ? ` · ${student.branch}` : ''}
             </div>
           </div>
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+
+          {/* Right: Status pill + actions */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            marginLeft: isNarrowDrawer ? '0' : 'auto',
+            flexWrap: 'wrap'
+          }}>
+            <div style={{
+              background: heroStatusBg,
+              color: 'white',
+              borderRadius: '20px',
+              padding: '3px 12px',
+              fontSize: '11px',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}>
+              ● {heroStatusText}
+            </div>
+
             {currentUser.role === "Admin" && (
               <button
                 onClick={() => setShowLinkModal(true)}
@@ -256,7 +331,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                   e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)';
                 }}
               >
-                <Link size={14} /> Link Student Account
+                <Link size={14} /> {!isNarrowDrawer && 'Link Student Account'}
               </button>
             )}
             <button
@@ -271,7 +346,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                 e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)';
               }}
             >
-              <Share2 size={14} /> {copiedLink ? "Link Copied!" : "Parent Link"}
+              <Share2 size={14} /> {!isNarrowDrawer && (copiedLink ? "Link Copied!" : "Parent Link")}
             </button>
             <button
               onClick={onClose}
@@ -285,18 +360,13 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                 e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)';
               }}
             >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-                   stroke="currentColor" strokeWidth="2.5">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-              Close
+              <X size={14} /> {!isNarrowDrawer && 'Close'}
             </button>
           </div>
         </div>
 
         {/* Body */}
-        <div className="modal-body" style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
+        <div className="modal-body" style={{ flex: 1, overflowY: "auto", padding: activeTab === "overview" ? "0 0 16px 0" : "16px 20px" }}>
           {/* Pill-group style tab bar */}
           <div style={{
             display: 'flex',
@@ -305,7 +375,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
             background: '#F4F5F7',
             borderRadius: '10px',
             flexWrap: 'wrap',
-            margin: '0 0 20px 0'
+            margin: '16px 16px 0'
           }}>
             {drawerTabs.map((tab) => {
               const IconComp = tab.icon;
@@ -358,81 +428,40 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
           </div>
           {/* OVERVIEW */}
           {activeTab === "overview" && (() => {
-            const rawStatus = (student.status || 'Active').trim();
-            const statusLower = rawStatus.toLowerCase();
-            const heroStatusBg = statusLower === 'withdrawn' ? '#EF4444' : statusLower === 'completed' ? '#6B7280' : '#22C55E';
-            const heroStatusText = statusLower === 'withdrawn' ? 'Withdrawn' : statusLower === 'completed' ? 'Completed' : 'Active';
-
-            const acadPillBg = statusLower === 'withdrawn' ? '#FEE2E2' : statusLower === 'completed' ? '#F3F4F6' : '#D1FAE5';
-            const acadPillColor = statusLower === 'withdrawn' ? '#991B1B' : statusLower === 'completed' ? '#374151' : '#065F46';
-
-            // Batches calculation
-            const allBatches = safeLS('pba_batches', []);
-            const liveBatchCount = (allBatches || []).filter(b =>
-              (b.students || []).some(s =>
-                (s.id || s.regNo || s.studentId || '').toString() === (student.id || student.regNo || '').toString()
-              )
-            ).length;
-
-            const studentEnrollments = (safeLS('pba_batch_enrollments', []) || [])
-              .filter(e => (e.studentId === student.id || (student.regNo && e.regNo === student.regNo)) && e.status === 'active');
-
-            const candidateRefs = [
-              ...(student.batches || []),
-              ...(studentEnrollments.map(e => e.batchId)),
-              student.batchId,
-              student.batchName,
-              student.batch,
-              ...((allBatches || [])
-                .filter(b => (b.students || []).some(s => (s.id && s.id === student.id) || (student.regNo && (s.regNo === student.regNo || s.id === student.regNo))))
-                .map(b => b.name))
-            ];
-
-            const batchLabels = [];
-            candidateRefs.forEach(ref => {
-              const resolved = resolveBatchName(ref);
-              if (resolved && resolved !== 'Unknown Batch' && !batchLabels.includes(resolved)) {
-                batchLabels.push(resolved);
-              }
-            });
-
-            const totalBatchCount = Math.max(liveBatchCount, batchLabels.length);
-
-            // ── Enroll date — all possible field-name variants, safe parsing ──
+            // ── Enroll date fallback chain ──
             const rawEnrollDate =
-              student.enrollmentDate  ||
-              student.enrolledDate    ||
-              student.enrollDate      ||
-              student.dateEnrolled    ||
-              student.startDate       ||
-              student.admissionDate   ||
-              student.createdAt       ||
+              student?.enrollmentDate ||
+              student?.enrolledDate ||
+              student?.enrollDate ||
+              student?.dateEnrolled ||
+              student?.startDate ||
+              student?.admissionDate ||
+              student?.createdAt ||
               null;
 
-            // ── Personal info — all possible field-name variants ──
+            // ── Personal info variants ──
             const studentBranch =
-              student.branch || student.branchName || student.campus || '';
+              student?.branch || student?.branchName || student?.campus || '';
 
             const studentDOB =
-              student.dateOfBirth || student.dob || student.birthDate ||
-              student.birthdate   || student.birthday || null;
+              student?.dateOfBirth || student?.dob || student?.birthDate ||
+              student?.birthdate || student?.birthday || null;
 
             const studentEmail =
-              student.email || student.emailAddress ||
-              student.studentEmail || '';
+              student?.email || student?.emailAddress ||
+              student?.studentEmail || '';
 
             const studentPhone =
-              student.phone       || student.studentPhone ||
-              student.phoneNo     || student.mobile || student.mobileNo || '';
+              student?.phone || student?.studentPhone ||
+              student?.phoneNo || student?.mobile || student?.mobileNo || '';
 
             const parentPhone =
-              student.parentPhone   || student.guardianPhone ||
-              student.parentMobile  || student.motherPhone ||
-              student.fatherPhone   || '';
+              student?.parentPhone || student?.guardianPhone ||
+              student?.parentMobile || student?.motherPhone ||
+              student?.fatherPhone || '';
 
-            // ── Personal Information card rows (order: Branch → DOB → Phone → ParentPhone → Email → Enrolled) ──
             const dobDisplay = getDobWithAge(studentDOB);
-            const enrolledDateFormatted = formatDate(rawEnrollDate, 'long');
+            const enrolledDateFormatted = formatDate(rawEnrollDate, 'short');
 
             const personalFields = [
               { icon: '📍', label: 'Branch',         value: studentBranch || '' },
@@ -443,227 +472,65 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
               { icon: '📅', label: 'Enrolled',       value: rawEnrollDate ? enrolledDateFormatted : '' }
             ].filter(f => f.value && String(f.value).trim() !== '');
 
-
-            const isNarrowDrawer = isMobileState || (typeof window !== 'undefined' && window.innerWidth < 640);
-
             return (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {/* ── SECTION 1 — Student Hero Banner ── */}
-                <div style={{
-                  background: 'linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)',
-                  padding: '20px 24px',
-                  borderRadius: '12px',
-                  color: 'white',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '16px',
-                  marginBottom: '20px',
-                  flexWrap: isNarrowDrawer ? 'wrap' : 'nowrap'
-                }}>
-                  {/* Avatar circle */}
-                  <div style={{
-                    width: '56px',
-                    height: '56px',
-                    borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.2)',
-                    border: '2px solid rgba(255,255,255,0.4)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '20px',
-                    fontWeight: 700,
-                    color: 'white',
-                    flexShrink: 0
-                  }}>
-                    {getInitials(student.name)}
-                  </div>
-
-                  {/* Student details */}
-                  <div style={{ flex: 1, minWidth: '180px' }}>
-                    <div style={{ fontSize: '20px', fontWeight: 700, color: 'white', marginBottom: '2px' }}>
-                      {student.name || 'Student Name'}
-                    </div>
-                    <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.75)', marginBottom: '4px' }}>
-                      {student.regNo || student.id || 'No Reg No'}
-                    </div>
-                    <div style={{
-                      background: 'rgba(255,255,255,0.15)',
-                      border: '1px solid rgba(255,255,255,0.25)',
-                      borderRadius: '20px',
-                      padding: '3px 10px',
-                      fontSize: '12px',
-                      color: 'white',
-                      display: 'inline-block'
-                    }}>
-                    {(() => {
-                      const studentId = (student.id || student.regNo || student.studentId || '').toString();
-                      const enrolledBatches = (safeLS('pba_batches', []) || []).filter(b =>
-                        (b.students || []).some(s =>
-                          (s.id || s.regNo || s.studentId || '').toString() === studentId
-                        )
-                      );
-                      const primaryBatch = enrolledBatches[0] || null;
-                      const batchChipText = primaryBatch
-                        ? `${primaryBatch.name}${studentBranch ? ' · ' + studentBranch : ''}`
-                        : (batchLabels[0]
-                          ? `${batchLabels[0]}${studentBranch ? ' · ' + studentBranch : ''}`
-                          : (studentBranch || 'No batch assigned'));
-                      return batchChipText;
-                    })()}
-                    </div>
-                  </div>
-
-                  {/* Status badge */}
-                  <div style={{
-                    marginLeft: isNarrowDrawer ? '0' : 'auto',
-                    alignSelf: isNarrowDrawer ? 'flex-start' : 'center',
-                    background: heroStatusBg,
-                    color: 'white',
-                    borderRadius: '20px',
-                    padding: '4px 14px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '5px'
-                  }}>
-                    <span style={{ fontSize: '8px' }}>●</span> {heroStatusText}
-                  </div>
-                </div>
-
-                {/* ── SECTION 2 — Quick Stats Row (4 tiles) ── */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: isNarrowDrawer ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-                  gap: '12px',
-                  marginBottom: '20px'
-                }}>
-                  {/* Tile 1: Enrolled */}
-                  <div style={{
-                    background: '#F9FAFB',
-                    border: '1px solid #E5E7EB',
-                    borderRadius: '10px',
-                    padding: '14px 16px',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '18px', marginBottom: '4px' }}>📅</div>
-                    <div style={{
-                      fontSize: '11px', color: '#6B7280', fontWeight: 500, marginBottom: '2px',
-                      textTransform: 'uppercase', letterSpacing: '0.5px'
-                    }}>Enrolled</div>
-                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827' }}>
-                      {formatDate(rawEnrollDate, 'short')}
-                    </div>
-                  </div>
-
-                  {/* Tile 2: Batches */}
-                  <div style={{
-                    background: '#F9FAFB',
-                    border: '1px solid #E5E7EB',
-                    borderRadius: '10px',
-                    padding: '14px 16px',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '18px', marginBottom: '4px' }}>🎓</div>
-                    <div style={{
-                      fontSize: '11px', color: '#6B7280', fontWeight: 500, marginBottom: '2px',
-                      textTransform: 'uppercase', letterSpacing: '0.5px'
-                    }}>Batches</div>
-                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827' }}>
-                      {totalBatchCount}
-                    </div>
-                  </div>
-
-                  {/* Tile 3: Documents */}
-                  <div style={{
-                    background: '#F9FAFB',
-                    border: '1px solid #E5E7EB',
-                    borderRadius: '10px',
-                    padding: '14px 16px',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '18px', marginBottom: '4px' }}>📄</div>
-                    <div style={{
-                      fontSize: '11px', color: '#6B7280', fontWeight: 500, marginBottom: '2px',
-                      textTransform: 'uppercase', letterSpacing: '0.5px'
-                    }}>Documents</div>
-                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827' }}>
-                      {studentDocs.length}
-                    </div>
-                  </div>
-
-                  {/* Tile 4: Discipline */}
-                  <div style={{
-                    background: '#F9FAFB',
-                    border: '1px solid #E5E7EB',
-                    borderRadius: '10px',
-                    padding: '14px 16px',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '18px', marginBottom: '4px' }}>⚠️</div>
-                    <div style={{
-                      fontSize: '11px', color: '#6B7280', fontWeight: 500, marginBottom: '2px',
-                      textTransform: 'uppercase', letterSpacing: '0.5px'
-                    }}>Discipline</div>
-                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827' }}>
-                      {studentDiscipline.length}
-                    </div>
-                  </div>
-                </div>
-
-                {/* ── SECTION 3 — Personal Information card ── */}
+                {/* ── SECTION 2 — Personal Information card (compact 2-col grid) ── */}
                 <div style={{
                   background: 'white',
                   border: '1px solid #E5E7EB',
                   borderRadius: '12px',
-                  padding: '20px 24px',
-                  marginBottom: '16px'
+                  padding: '16px 20px',
+                  margin: '12px 16px 0'
                 }}>
                   <div style={{
-                    fontSize: '13px',
+                    fontSize: '11px',
                     fontWeight: 700,
-                    color: '#374151',
+                    color: '#6B7280',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                    marginBottom: '16px',
+                    letterSpacing: '0.6px',
+                    marginBottom: '12px',
+                    paddingBottom: '8px',
+                    borderBottom: '1px solid #F3F4F6',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '8px',
-                    paddingBottom: '10px',
-                    borderBottom: '1px solid #F3F4F6'
+                    gap: '6px'
                   }}>
                     <span>👤</span>
-                    <span>Personal Information</span>
+                    <span>PERSONAL INFORMATION</span>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    {personalFields.map((field, idx) => (
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: isNarrowDrawer ? '1fr' : '1fr 1fr',
+                    columnGap: '24px',
+                    rowGap: '2px'
+                  }}>
+                    {personalFields.map((field) => (
                       <div
                         key={field.label}
                         style={{
                           display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: '12px',
-                          padding: '8px 0',
-                          borderBottom: idx === personalFields.length - 1 ? 'none' : '1px solid #F9FAFB'
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '6px 0',
+                          borderBottom: '1px solid #F9FAFB'
                         }}
                       >
                         <span style={{
-                          fontSize: '14px',
-                          width: '20px',
+                          fontSize: '13px',
+                          width: '18px',
                           textAlign: 'center',
-                          color: '#6B7280',
-                          flexShrink: 0,
-                          marginTop: '1px'
+                          color: '#9CA3AF',
+                          flexShrink: 0
                         }}>
                           {field.icon}
                         </span>
                         <span style={{
-                          width: '130px',
-                          flexShrink: 0,
-                          fontSize: '12px',
+                          fontSize: '11px',
                           color: '#6B7280',
-                          fontWeight: 500
+                          fontWeight: 500,
+                          width: '100px',
+                          flexShrink: 0
                         }}>
                           {field.label}
                         </span>
@@ -680,111 +547,102 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                   </div>
                 </div>
 
-                {/* ── SECTION 4 — Academic Status + Enrolled Batches (side by side) ── */}
+                {/* ── SECTION 3 — Academic Status + Enrolled Batches (side by side) ── */}
                 <div style={{
                   display: 'grid',
                   gridTemplateColumns: isNarrowDrawer ? '1fr' : '1fr 1fr',
-                  gap: '16px'
+                  gap: '12px',
+                  margin: '12px 16px 0'
                 }}>
-                  {/* Academic Status Card */}
+                  {/* Academic Status card (left) */}
                   <div style={{
                     background: 'white',
                     border: '1px solid #E5E7EB',
                     borderRadius: '12px',
-                    padding: '20px 24px'
+                    padding: '16px 20px'
                   }}>
                     <div style={{
-                      fontSize: '13px',
+                      fontSize: '11px',
                       fontWeight: 700,
-                      color: '#374151',
+                      color: '#6B7280',
                       textTransform: 'uppercase',
-                      letterSpacing: '0.5px',
-                      marginBottom: '16px',
+                      letterSpacing: '0.6px',
+                      marginBottom: '12px',
+                      paddingBottom: '8px',
+                      borderBottom: '1px solid #F3F4F6',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '8px',
-                      paddingBottom: '10px',
-                      borderBottom: '1px solid #F3F4F6'
+                      gap: '6px'
                     }}>
                       <span>🎓</span>
-                      <span>Academic Status</span>
+                      <span>ACADEMIC STATUS</span>
                     </div>
 
-                    {/* Status pill */}
-                    <div style={{ marginBottom: '16px' }}>
+                    <div style={{ textAlign: 'center', marginBottom: '12px' }}>
                       <span style={{
-                        display: 'inline-block',
-                        padding: '6px 18px',
-                        borderRadius: '20px',
-                        fontSize: '13px',
-                        fontWeight: 700,
                         background: acadPillBg,
-                        color: acadPillColor
+                        color: acadPillColor,
+                        borderRadius: '20px',
+                        padding: '4px 14px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        display: 'inline-block'
                       }}>
-                        ● {heroStatusText.toUpperCase()}
+                        {heroStatusText}
                       </span>
                     </div>
 
-                    {/* Admin Notes */}
-                    <div>
-                      <label style={{
-                        display: 'block',
-                        fontSize: '12px',
-                        color: '#6B7280',
-                        fontWeight: 500,
-                        marginBottom: '6px'
-                      }}>
-                        📝 Admin Notes
-                      </label>
-                      <textarea
-                        value={adminNotes}
-                        onChange={(e) => setAdminNotes(e.target.value)}
-                        onBlur={handleSaveAdminNotes}
-                        placeholder="Add confidential academic or administrative notes..."
-                        style={{
-                          width: '100%',
-                          minHeight: '80px',
-                          padding: '10px 12px',
-                          border: '1px solid #E5E7EB',
-                          borderRadius: '8px',
-                          fontSize: '13px',
-                          color: '#111827',
-                          resize: 'vertical',
-                          background: '#F9FAFB',
-                          boxSizing: 'border-box',
-                          fontFamily: 'inherit'
-                        }}
-                      />
+                    <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: 500, marginBottom: '4px' }}>
+                      Admin Notes
                     </div>
+                    <textarea
+                      value={adminNotes}
+                      onChange={(e) => setAdminNotes(e.target.value)}
+                      onBlur={handleSaveAdminNotes}
+                      placeholder="Add confidential academic or administrative notes..."
+                      style={{
+                        width: '100%',
+                        minHeight: '70px',
+                        padding: '8px 10px',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        color: '#111827',
+                        resize: 'vertical',
+                        background: '#F9FAFB',
+                        boxSizing: 'border-box',
+                        fontFamily: "'Inter', sans-serif"
+                      }}
+                    />
                   </div>
 
-                  {/* Enrolled Batches Card */}
+                  {/* Enrolled Batches card (right) */}
                   <div style={{
                     background: 'white',
                     border: '1px solid #E5E7EB',
                     borderRadius: '12px',
-                    padding: '20px 24px'
+                    padding: '16px 20px'
                   }}>
                     <div style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      marginBottom: '16px',
-                      paddingBottom: '10px',
+                      marginBottom: '12px',
+                      paddingBottom: '8px',
                       borderBottom: '1px solid #F3F4F6'
                     }}>
                       <div style={{
-                        fontSize: '13px',
+                        fontSize: '11px',
                         fontWeight: 700,
-                        color: '#374151',
+                        color: '#6B7280',
                         textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
+                        letterSpacing: '0.6px',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '8px'
+                        gap: '6px'
                       }}>
                         <span>📚</span>
-                        <span>Enrolled Batches</span>
+                        <span>ENROLLED BATCHES</span>
                       </div>
                       <button
                         onClick={() => {
@@ -797,71 +655,170 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                           background: '#2563EB',
                           color: 'white',
                           border: 'none',
-                          borderRadius: '8px',
-                          padding: '5px 12px',
-                          fontSize: '12px',
+                          borderRadius: '6px',
+                          padding: '4px 10px',
+                          fontSize: '11px',
                           fontWeight: 600,
                           cursor: 'pointer'
                         }}
                       >
-                        + Enroll in Batch
+                        + Enroll
                       </button>
                     </div>
 
-                    {batchLabels.length === 0 ? (
+                    {enrolledBatches.length === 0 ? (
                       <div style={{
-                        fontSize: '13px',
+                        fontSize: '12px',
                         color: '#9CA3AF',
                         textAlign: 'center',
-                        padding: '20px 0'
+                        padding: '12px 0'
                       }}>
-                        No batches enrolled yet
+                        No batches enrolled
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {batchLabels.map((name, i) => (
-                          <span
-                            key={i}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                        {enrolledBatches.map(b => (
+                          <div
+                            key={b.id || b.name}
                             style={{
                               display: 'inline-flex',
                               alignItems: 'center',
-                              gap: '6px',
+                              gap: 6,
                               background: '#EFF6FF',
                               color: '#1D4ED8',
                               border: '1px solid #BFDBFE',
-                              borderRadius: '20px',
-                              padding: '4px 12px',
-                              fontSize: '12px',
+                              borderRadius: 20,
+                              padding: '3px 10px',
+                              fontSize: 11,
                               fontWeight: 500,
-                              margin: '4px 4px 4px 0'
+                              margin: '3px 3px 3px 0'
                             }}
                           >
-                            <span>{name}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleUnenrollBatch(name)}
-                              title="Remove from batch"
+                            <span>{b.name}</span>
+                            <span
+                              onClick={() => handleUnenrollBatch(b.id || b.name)}
                               style={{
-                                background: 'transparent',
-                                border: 'none',
-                                color: '#93C5FD',
                                 cursor: 'pointer',
-                                padding: 0,
-                                fontSize: '14px',
+                                color: '#93C5FD',
+                                fontWeight: 700,
+                                fontSize: 13,
                                 lineHeight: 1,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                marginLeft: '2px'
+                                marginLeft: 2
                               }}
                               onMouseEnter={(e) => { e.currentTarget.style.color = '#EF4444'; }}
                               onMouseLeave={(e) => { e.currentTarget.style.color = '#93C5FD'; }}
                             >
                               ×
-                            </button>
-                          </span>
+                            </span>
+                          </div>
                         ))}
                       </div>
                     )}
+                  </div>
+                </div>
+
+                {/* ── SECTION 4 — Quick Stats bar (compact 4-tile row) ── */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: isNarrowDrawer ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+                  gap: '8px',
+                  margin: '12px 16px 16px'
+                }}>
+                  {/* Tile 1: Enrolled */}
+                  <div style={{
+                    background: '#F9FAFB',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    padding: '10px 12px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '16px', marginBottom: '2px' }}>📅</div>
+                    <div style={{
+                      fontSize: '10px',
+                      color: '#6B7280',
+                      fontWeight: 500,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.4px'
+                    }}>
+                      ENROLLED
+                    </div>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: '#111827' }}>
+                      {rawEnrollDate ? formatDate(rawEnrollDate, 'short') : 'N/A'}
+                    </div>
+                  </div>
+
+                  {/* Tile 2: Batches */}
+                  <div style={{
+                    background: '#F9FAFB',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    padding: '10px 12px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '16px', marginBottom: '2px' }}>📚</div>
+                    <div style={{
+                      fontSize: '10px',
+                      color: '#6B7280',
+                      fontWeight: 500,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.4px'
+                    }}>
+                      BATCHES
+                    </div>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: '#111827' }}>
+                      {enrolledBatches.length}
+                    </div>
+                  </div>
+
+                  {/* Tile 3: Documents */}
+                  <div style={{
+                    background: '#F9FAFB',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    padding: '10px 12px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '16px', marginBottom: '2px' }}>📄</div>
+                    <div style={{
+                      fontSize: '10px',
+                      color: '#6B7280',
+                      fontWeight: 500,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.4px'
+                    }}>
+                      DOCUMENTS
+                    </div>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: '#111827' }}>
+                      {(safeLS('pba_student_documents', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
+                        || (safeLS('pba_documents', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
+                        || studentDocs.length}
+                    </div>
+                  </div>
+
+                  {/* Tile 4: Discipline */}
+                  <div style={{
+                    background: '#F9FAFB',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    padding: '10px 12px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '16px', marginBottom: '2px' }}>⚠️</div>
+                    <div style={{
+                      fontSize: '10px',
+                      color: '#6B7280',
+                      fontWeight: 500,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.4px'
+                    }}>
+                      DISCIPLINE
+                    </div>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: '#111827' }}>
+                      {(safeLS('pba_discipline_records', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
+                        || (safeLS('pba_discipline', []) || [])
+                        .filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
+                        || studentDiscipline.length}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1471,6 +1428,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
             };
           });
           saveLS('pba_batches', updatedBatches);
+          setBatchRefresh(r => r + 1);
 
           setShowSingleEnrollModal(false);
         };
