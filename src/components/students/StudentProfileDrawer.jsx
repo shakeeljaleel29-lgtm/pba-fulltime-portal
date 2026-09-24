@@ -56,6 +56,16 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
   const [adminNotes, setAdminNotes] = useState(student?.adminNotes || "");
   const [profileRefresh, setProfileRefresh] = useState(0);
   const [batchRefresh, setBatchRefresh] = useState(0);
+  const [disciplineRefresh, setDisciplineRefresh] = useState(0);
+
+  const [disciplineModal, setDisciplineModal] = useState(false);
+  const [editingDiscipline, setEditingDiscipline] = useState(null);
+  const [disciplineForm, setDisciplineForm] = useState({
+    date: '',
+    type: 'Tardiness',
+    description: '',
+    severity: 'Warning',
+  });
 
   const studentIdStr = (
     student?.id || student?.regNo || student?.studentId || ''
@@ -89,6 +99,66 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
   const [enrollBatchId, setEnrollBatchId] = useState("");
   const [enrollStream, setEnrollStream] = useState("");
   const [enrollSelectedSubjects, setEnrollSelectedSubjects] = useState([]);
+
+  const openDisciplineModal = (existing) => {
+    if (existing) {
+      setEditingDiscipline(existing);
+      setDisciplineForm({
+        date: existing.date || '',
+        type: existing.type || 'Tardiness',
+        description: existing.description || '',
+        severity: existing.severity || 'Warning',
+      });
+    } else {
+      setEditingDiscipline(null);
+      // Default date = today
+      const today = new Date();
+      const todayStr = today.getFullYear() + '-'
+        + String(today.getMonth() + 1).padStart(2, '0') + '-'
+        + String(today.getDate()).padStart(2, '0');
+      setDisciplineForm({
+        date: todayStr,
+        type: 'Tardiness',
+        description: '',
+        severity: 'Warning',
+      });
+    }
+    setDisciplineModal(true);
+  };
+
+  const saveDisciplineRecord = () => {
+    if (!disciplineForm.date || !disciplineForm.description.trim()) {
+      alert('Please fill in Date and Description.');
+      return;
+    }
+    const existing = safeLS('pba_discipline', []) || [];
+    let updated;
+    if (editingDiscipline) {
+      updated = existing.map(r =>
+        r.id === editingDiscipline.id
+          ? { ...r, ...disciplineForm }
+          : r
+      );
+    } else {
+      updated = [...existing, {
+        id: Date.now().toString(),
+        studentId: studentIdStr,
+        ...disciplineForm,
+        addedBy: 'Admin',
+        addedAt: new Date().toISOString(),
+      }];
+    }
+    saveLS('pba_discipline', updated);
+    setDisciplineRefresh(r => r + 1);
+    setDisciplineModal(false);
+  };
+
+  const deleteDisciplineRecord = (id) => {
+    if (!window.confirm('Delete this discipline record?')) return;
+    const existing = safeLS('pba_discipline', []) || [];
+    saveLS('pba_discipline', existing.filter(r => r.id !== id));
+    setDisciplineRefresh(r => r + 1);
+  };
 
   if (!student) return null;
 
@@ -228,10 +298,11 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
     fontFamily: "'Inter', sans-serif"
   };
 
-  const disciplineCount =
-    (safeLS('pba_discipline_records', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
-    || (safeLS('pba_discipline', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
-    || studentDiscipline.length;
+  const disciplineCount = React.useMemo(() => {
+    return (safeLS('pba_discipline', []) || [])
+      .filter(r => (r.studentId || '').toString() === studentIdStr)
+      .length;
+  }, [studentIdStr, disciplineRefresh]);
 
   const docsCount =
     (safeLS('pba_student_documents', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
@@ -881,10 +952,7 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
                       DISCIPLINE
                     </div>
                     <div style={{ fontSize: '15px', fontWeight: 700, color: '#111827' }}>
-                      {(safeLS('pba_discipline_records', []) || []).filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
-                        || (safeLS('pba_discipline', []) || [])
-                        .filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr).length
-                        || studentDiscipline.length}
+                      {disciplineCount}
                     </div>
                   </div>
                 </div>
@@ -1298,101 +1366,187 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
 
           {/* DISCIPLINE */}
           {activeTab === "discipline" && (() => {
-            const storedDiscipline = (safeLS('pba_discipline_records', []) || [])
-              .filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr);
-            const fallbackDiscipline = (safeLS('pba_discipline', []) || [])
-              .filter(d => (d.studentId || d.regNo || '').toString() === studentIdStr);
+            const disciplineRecords = (safeLS('pba_discipline', []) || [])
+              .filter(r => (r.studentId || '').toString() === studentIdStr)
+              .sort((a, b) => (b.date || '').localeCompare(a.date || '')); // newest first
 
-            const allDiscipline = storedDiscipline.length > 0
-              ? storedDiscipline
-              : fallbackDiscipline.length > 0
-                ? fallbackDiscipline
-                : studentDiscipline;
+            const formatDisciplineDate = (dateStr) => {
+              if (!dateStr) return '—';
+              try {
+                const parts = String(dateStr).split('T')[0].split('-');
+                if (parts.length === 3) {
+                  const y = parseInt(parts[0], 10);
+                  const m = parseInt(parts[1], 10) - 1;
+                  const d = parseInt(parts[2], 10);
+                  const dt = new Date(y, m, d);
+                  if (!isNaN(dt.getTime())) {
+                    const day = String(dt.getDate()).padStart(2, '0');
+                    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                    return `${day} ${months[dt.getMonth()]} ${dt.getFullYear()}`;
+                  }
+                }
+                return dateStr;
+              } catch {
+                return dateStr;
+              }
+            };
 
-            const getSeverityStyle = (sev, type) => {
-              const s = (sev || type || '').toLowerCase();
-              if (s.includes('suspension') || s.includes('critical') || s.includes('severe')) {
-                return { background: '#FEE2E2', color: '#991B1B', label: sev || 'Suspension' };
+            const getSeverityStyle = (severity) => {
+              const sev = (severity || '').trim();
+              if (sev === 'Suspension') {
+                return { bg: '#FEE2E2', text: '#991B1B' };
               }
-              if (s.includes('warning') || s.includes('moderate')) {
-                return { background: '#FEF3C7', color: '#92400E', label: sev || 'Warning' };
+              if (sev === 'Warning') {
+                return { bg: '#FEF3C7', text: '#92400E' };
               }
-              return { background: '#F3F4F6', color: '#374151', label: sev || 'Note' };
+              return { bg: '#F3F4F6', text: '#374151' };
             };
 
             return (
-              <div style={{
-                background: 'white',
-                border: '1px solid #E5E7EB',
-                borderRadius: 12,
-                overflow: 'hidden'
-              }}>
+              <div>
+                {/* SECTION A — Header */}
                 <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1.2fr 2fr 1fr',
-                  background: '#F9FAFB',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#6B7280',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.4px',
-                  padding: '10px 16px',
-                  borderBottom: '1px solid #E5E7EB'
+                  display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', marginBottom: 16
                 }}>
-                  <div>DATE</div>
-                  <div>TYPE</div>
-                  <div>DESCRIPTION</div>
-                  <div style={{ textAlign: 'right' }}>SEVERITY</div>
+                  <div style={{
+                    fontSize: 11, fontWeight: 700, color: '#6B7280',
+                    textTransform: 'uppercase', letterSpacing: '0.6px'
+                  }}>
+                    ⚠ Discipline Records
+                  </div>
+                  <button
+                    onClick={() => openDisciplineModal(null)}
+                    style={{
+                      background: '#DC2626', color: 'white',
+                      border: 'none', borderRadius: 8,
+                      padding: '7px 14px', fontSize: 12, fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    + Add Record
+                  </button>
                 </div>
 
-                {allDiscipline.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '32px', color: '#9CA3AF', fontSize: 13 }}>
-                    No discipline records
+                {/* SECTION B — Table Card */}
+                <div style={{
+                  background: 'white',
+                  border: '1px solid #E5E7EB',
+                  borderRadius: 12,
+                  overflow: 'hidden'
+                }}>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1.2fr 1.4fr 2.4fr 1.2fr 1.2fr',
+                    background: '#F9FAFB',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: '#6B7280',
+                    textTransform: 'uppercase',
+                    padding: '10px 16px',
+                    borderBottom: '1px solid #E5E7EB'
+                  }}>
+                    <div>DATE</div>
+                    <div>TYPE</div>
+                    <div>DESCRIPTION</div>
+                    <div>SEVERITY</div>
+                    <div style={{ textAlign: 'right' }}>ACTIONS</div>
                   </div>
-                ) : (
-                  <div>
-                    {allDiscipline.map((d, idx) => {
-                      const sevChip = getSeverityStyle(d.severity, d.type);
-                      return (
-                        <div
-                          key={d.id || idx}
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: '1fr 1.2fr 2fr 1fr',
-                            alignItems: 'center',
-                            padding: '10px 16px',
-                            borderBottom: idx === allDiscipline.length - 1 ? 'none' : '1px solid #F3F4F6',
-                            fontSize: 13,
-                            color: '#111827'
-                          }}
-                        >
-                          <div style={{ fontSize: 12, color: '#6B7280' }}>
-                            {d.date || d.dateIssued || '—'}
+
+                  {disciplineRecords.length === 0 ? (
+                    <div style={{
+                      textAlign: 'center', padding: '32px',
+                      color: '#9CA3AF', fontSize: 13
+                    }}>
+                      No discipline records for this student
+                    </div>
+                  ) : (
+                    <div>
+                      {disciplineRecords.map((record, idx) => {
+                        const sevStyle = getSeverityStyle(record.severity);
+                        return (
+                          <div
+                            key={record.id || idx}
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1.2fr 1.4fr 2.4fr 1.2fr 1.2fr',
+                              alignItems: 'center',
+                              padding: '12px 16px',
+                              borderBottom: idx === disciplineRecords.length - 1 ? 'none' : '1px solid #F9FAFB',
+                              fontSize: 13,
+                              color: '#111827',
+                              verticalAlign: 'top'
+                            }}
+                          >
+                            <div style={{ fontSize: 13, color: '#374151' }}>
+                              {formatDisciplineDate(record.date)}
+                            </div>
+                            <div style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>
+                              {record.type || 'Other'}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                color: '#6B7280',
+                                maxWidth: 200,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }}
+                              title={record.description}
+                            >
+                              {record.description || '—'}
+                            </div>
+                            <div>
+                              <span style={{
+                                background: sevStyle.bg,
+                                color: sevStyle.text,
+                                borderRadius: 20,
+                                padding: '2px 10px',
+                                fontSize: 11,
+                                fontWeight: 600,
+                                display: 'inline-block'
+                              }}>
+                                {record.severity || 'Note'}
+                              </span>
+                            </div>
+                            <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              <button
+                                onClick={() => openDisciplineModal(record)}
+                                style={{
+                                  background: '#F3F4F6',
+                                  border: '1px solid #E5E7EB',
+                                  borderRadius: 6,
+                                  padding: '4px 8px',
+                                  fontSize: 12,
+                                  cursor: 'pointer',
+                                  color: '#374151',
+                                  marginRight: 4
+                                }}
+                              >
+                                ✏ Edit
+                              </button>
+                              <button
+                                onClick={() => deleteDisciplineRecord(record.id)}
+                                style={{
+                                  background: '#FEF2F2',
+                                  border: '1px solid #FECACA',
+                                  borderRadius: 6,
+                                  padding: '4px 8px',
+                                  fontSize: 12,
+                                  cursor: 'pointer',
+                                  color: '#DC2626'
+                                }}
+                              >
+                                🗑 Delete
+                              </button>
+                            </div>
                           </div>
-                          <div style={{ fontSize: 12, fontWeight: 600 }}>
-                            {d.type || 'Incident'}
-                          </div>
-                          <div style={{ fontSize: 12, color: '#4B5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {d.description || d.reason || '—'}
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <span style={{
-                              background: sevChip.background,
-                              color: sevChip.color,
-                              borderRadius: 20,
-                              padding: '2px 10px',
-                              fontSize: 11,
-                              fontWeight: 600,
-                              display: 'inline-block'
-                            }}>
-                              {sevChip.label}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })()}
@@ -2161,6 +2315,163 @@ export const StudentProfileDrawer = ({ student, initialTab = "overview", onClose
           </div>
         );
       })()}
+      {/* ── SECTION D: Discipline Add/Edit Modal ── */}
+      {disciplineModal && (
+        <div style={{
+          position: 'fixed', inset: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 16,
+            padding: '28px 32px', width: 460,
+            maxWidth: '92vw',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+          }}>
+
+            {/* Header */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', marginBottom: 24
+            }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111827' }}>
+                {editingDiscipline ? 'Edit Record' : 'Add Discipline Record'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setDisciplineModal(false)}
+                style={{
+                  background: 'none', border: 'none',
+                  fontSize: 22, cursor: 'pointer', color: '#6B7280'
+                }}
+              >×</button>
+            </div>
+
+            {/* Date */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{
+                display: 'block', fontSize: 13, fontWeight: 600,
+                color: '#374151', marginBottom: 6
+              }}>Date *</label>
+              <input
+                type="date"
+                value={disciplineForm.date}
+                onChange={e => setDisciplineForm(f => ({ ...f, date: e.target.value }))}
+                style={{
+                  width: '100%', padding: '10px 12px',
+                  border: '1px solid #D1D5DB', borderRadius: 8,
+                  fontSize: 14, color: '#111827', boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            {/* Type */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{
+                display: 'block', fontSize: 13, fontWeight: 600,
+                color: '#374151', marginBottom: 6
+              }}>Type *</label>
+              <select
+                value={disciplineForm.type}
+                onChange={e => setDisciplineForm(f => ({ ...f, type: e.target.value }))}
+                style={{
+                  width: '100%', padding: '10px 12px',
+                  border: '1px solid #D1D5DB', borderRadius: 8,
+                  fontSize: 14, color: '#111827', background: 'white', boxSizing: 'border-box'
+                }}
+              >
+                <option>Tardiness</option>
+                <option>Absence Without Leave</option>
+                <option>Misconduct</option>
+                <option>Disruptive Behaviour</option>
+                <option>Academic Dishonesty</option>
+                <option>Dress Code Violation</option>
+                <option>Disrespect to Staff</option>
+                <option>Property Damage</option>
+                <option>Other</option>
+              </select>
+            </div>
+
+            {/* Severity */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{
+                display: 'block', fontSize: 13, fontWeight: 600,
+                color: '#374151', marginBottom: 8
+              }}>Severity *</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[
+                  { v: 'Note',       bg: '#F3F4F6', border: '#E5E7EB', text: '#374151' },
+                  { v: 'Warning',    bg: '#FEF3C7', border: '#FDE68A', text: '#92400E' },
+                  { v: 'Suspension', bg: '#FEE2E2', border: '#FECACA', text: '#991B1B' },
+                ].map(opt => (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    onClick={() => setDisciplineForm(f => ({ ...f, severity: opt.v }))}
+                    style={{
+                      flex: 1, padding: '8px 0',
+                      background: disciplineForm.severity === opt.v ? opt.bg : 'white',
+                      border: `2px solid ${disciplineForm.severity === opt.v ? opt.border : '#E5E7EB'}`,
+                      borderRadius: 8,
+                      fontSize: 13, fontWeight: 600,
+                      color: disciplineForm.severity === opt.v ? opt.text : '#9CA3AF',
+                      cursor: 'pointer'
+                    }}
+                  >{opt.v}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Description */}
+            <div style={{ marginBottom: 24 }}>
+              <label style={{
+                display: 'block', fontSize: 13, fontWeight: 600,
+                color: '#374151', marginBottom: 6
+              }}>Description *</label>
+              <textarea
+                rows={3}
+                placeholder="Describe the incident..."
+                value={disciplineForm.description}
+                onChange={e => setDisciplineForm(f => ({ ...f, description: e.target.value }))}
+                style={{
+                  width: '100%', padding: '10px 12px',
+                  border: '1px solid #D1D5DB', borderRadius: 8,
+                  fontSize: 14, color: '#111827',
+                  resize: 'vertical', boxSizing: 'border-box',
+                  background: '#F9FAFB'
+                }}
+              />
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setDisciplineModal(false)}
+                style={{
+                  padding: '10px 20px', background: '#F3F4F6',
+                  border: '1px solid #E5E7EB', borderRadius: 8,
+                  fontSize: 14, fontWeight: 600,
+                  cursor: 'pointer', color: '#374151'
+                }}
+              >Cancel</button>
+              <button
+                type="button"
+                onClick={saveDisciplineRecord}
+                style={{
+                  padding: '10px 24px', background: '#DC2626',
+                  border: 'none', borderRadius: 8,
+                  fontSize: 14, fontWeight: 600,
+                  cursor: 'pointer', color: 'white'
+                }}
+              >
+                {editingDiscipline ? 'Save Changes' : 'Add Record'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
